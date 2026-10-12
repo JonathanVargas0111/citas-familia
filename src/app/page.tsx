@@ -274,9 +274,31 @@ export default function Home() {
     });
     setModalCitaAbierto(false);
     await sincronizar(personas, nietos, actualizadas);
+
+    // Alerta directa a WhatsApp para convocar acompañante en el grupo
+    const paciente = personas.find(p => p.id === personaIdFinal);
+    const slug = paciente ? obtenerSlugPaciente(paciente) : '';
+    const linkApp = typeof window !== 'undefined' ? `${window.location.origin}?paciente=${slug}` : '';
+    const fecha = new Date(item.fecha_hora).toLocaleString('es-CO', { 
+      weekday: 'long', 
+      day: 'numeric', 
+      month: 'long', 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+
+    const texto = `🚨 *Nueva Cita Médica Familia*\n\n` +
+      `👤 *Paciente:* ${paciente?.nombre || 'Familiar'}\n` +
+      `🩺 *Especialidad:* ${item.especialidad}\n` +
+      `🗓️ *Fecha:* ${fecha}\n` +
+      `📍 *Lugar:* ${item.lugar}\n` +
+      (item.notas ? `📝 *Notas:* ${item.notas}\n` : '') +
+      `\n⚠️ *¿Quién puede acompañarla?*\nPostulate tocando acá: ${linkApp}`;
+
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
   };
 
-  // Asignar acompañante y disparar WhatsApp doble
+  // Asignar acompañante y disparar WhatsApp DIRECTO al grupo en 1 clic
   const asignarAcompanante = async (citaId: string, nombreAcompanante: string) => {
     const citaActual = citas.find(c => c.id === citaId);
     if (!citaActual) return;
@@ -296,11 +318,27 @@ export default function Home() {
     setCitaSeleccionadaParaAcompanar(null);
     await sincronizar(personas, nietos, actualizadas);
 
-    setModalExitoWhatsApp({
-      cita: { ...citaActual, acompanante: nombreAcompanante },
-      acompanante: nombreAcompanante,
-      paciente
+    // Enviar DIRECTO a WhatsApp al grupo sin modales que confundan
+    const fecha = new Date(citaActual.fecha_hora).toLocaleString('es-CO', { 
+      weekday: 'long', 
+      day: 'numeric', 
+      month: 'long', 
+      hour: '2-digit', 
+      minute: '2-digit' 
     });
+
+    const slug = obtenerSlugPaciente(paciente);
+    const linkApp = typeof window !== 'undefined' ? `${window.location.origin}?paciente=${slug}` : '';
+
+    const texto = `✅ *¡Buenas noticias!* ${nombreAcompanante} confirmó que acompaña a:\n\n` +
+      `👵 *Paciente:* ${paciente.nombre}\n` +
+      `🩺 *Especialidad:* ${citaActual.especialidad}\n` +
+      `🗓️ *Fecha:* ${fecha}\n` +
+      `📍 *Lugar:* ${citaActual.lugar} (${citaActual.direccion || 'Sin dirección'})\n` +
+      (citaActual.notas ? `📝 *Detalles:* ${citaActual.notas}\n` : '') +
+      `\n🔗 Ver calendario familiar: ${linkApp}`;
+
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
   };
 
   // WhatsApp Grupo Familiar
