@@ -23,7 +23,9 @@ export async function GET() {
     }
 
     const data = await res.json();
-    const fileContent = data.files[FILENAME]?.content;
+    const files = Object.values(data.files || {}) as any[];
+    const fileContent = files[0]?.content;
+    const firstFileName = Object.keys(data.files || {})[0] || FILENAME;
 
     if (!fileContent) {
       return NextResponse.json({ personas: [], nietos: [], citas: [] });
@@ -52,7 +54,7 @@ export async function POST(req: Request) {
       },
       body: JSON.stringify({
         files: {
-          [FILENAME]: {
+          'citas_init.json': {
             content: JSON.stringify(body, null, 2),
           },
         },
