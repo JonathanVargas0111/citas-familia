@@ -526,6 +526,16 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <a
+              href="https://chat.whatsapp.com/GMAMnDAQNzK10Ii4w9tu9i"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl font-bold text-xs transition"
+              title="Abrir grupo oficial de WhatsApp"
+            >
+              <MessageCircle className="w-4 h-4 text-emerald-600" />
+              Grupo WhatsApp
+            </a>
             {personaEnPerfil ? (
               <>
                 <button 
