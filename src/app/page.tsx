@@ -19,7 +19,11 @@ import {
   ChevronRight,
   Phone,
   MessageCircle,
-  X
+  X,
+  ArrowLeft,
+  Maximize2,
+  Minimize2,
+  CalendarDays
 } from 'lucide-react';
 
 interface Persona {
@@ -57,9 +61,15 @@ export default function Home() {
   const [citas, setCitas] = useState<Cita[]>([]);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
-  const [filtroPersona, setFiltroPersona] = useState<string>('todos');
+  
+  // Perfil individual seleccionado
+  const [personaEnPerfil, setPersonaEnPerfil] = useState<Persona | null>(null);
 
-  const [mesActual, setMesActual] = useState(new Date(2026, 9, 1)); // Octubre 2026
+  // Modo de calendario: 'semana' por defecto
+  const [modoCalendario, setModoCalendario] = useState<'semana' | 'mes'>('semana');
+
+  // Fecha base del calendario (Inicia en Octubre 12, 2026)
+  const [fechaReferencia, setFechaReferencia] = useState(new Date(2026, 9, 12));
   const [diaSeleccionado, setDiaSeleccionado] = useState<string | null>(null);
   const [hoyIso, setHoyIso] = useState<string>('');
 
@@ -170,10 +180,13 @@ export default function Home() {
   // Crear Cita
   const handleGuardarCita = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nuevaCita.persona_id || !nuevaCita.especialidad || !nuevaCita.fecha_hora) return;
+    const personaIdFinal = nuevaCita.persona_id || personaEnPerfil?.id;
+    if (!personaIdFinal || !nuevaCita.especialidad || !nuevaCita.fecha_hora) return;
+
     const item: Cita = {
       id: Date.now().toString(),
       ...nuevaCita,
+      persona_id: personaIdFinal,
       estado: 'pendiente',
       acompanante: ''
     };
@@ -192,7 +205,7 @@ export default function Home() {
     await sincronizar(personas, nietos, actualizadas);
   };
 
-  // Asignar acompañante y disparar confirmación WhatsApp
+  // Asignar acompañante y disparar WhatsApp doble
   const asignarAcompanante = async (citaId: string, nombreAcompanante: string) => {
     const citaActual = citas.find(c => c.id === citaId);
     if (!citaActual) return;
@@ -212,7 +225,6 @@ export default function Home() {
     setCitaSeleccionadaParaAcompanar(null);
     await sincronizar(personas, nietos, actualizadas);
 
-    // Abrir modal de WhatsApp doble
     setModalExitoWhatsApp({
       cita: { ...citaActual, acompanante: nombreAcompanante },
       acompanante: nombreAcompanante,
@@ -220,7 +232,7 @@ export default function Home() {
     });
   };
 
-  // Mensaje para el grupo familiar
+  // WhatsApp Grupo Familiar
   const enviarWhatsAppGrupo = (cita: Cita, acompanante: string, paciente: Persona) => {
     const fecha = new Date(cita.fecha_hora).toLocaleString('es-CO', { 
       weekday: 'long', 
@@ -241,7 +253,7 @@ export default function Home() {
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
   };
 
-  // Mensaje personal al paciente
+  // WhatsApp Paciente Personal
   const enviarWhatsAppPaciente = (cita: Cita, acompanante: string, paciente: Persona) => {
     const fecha = new Date(cita.fecha_hora).toLocaleString('es-CO', { 
       weekday: 'long', 
@@ -267,180 +279,354 @@ export default function Home() {
     window.open(link, '_blank');
   };
 
-  // Días del mes actual para el calendario
-  const anio = mesActual.getFullYear();
-  const mes = mesActual.getMonth();
-  const primerDiaMes = new Date(anio, mes, 1);
-  const ultimoDiaMes = new Date(anio, mes + 1, 0);
-  
-  // Días de la semana (Lunes a Domingo)
-  // 0 = Domingo, 1 = Lunes ...
-  let diaInicioSemana = primerDiaMes.getDay();
-  // Ajustar para que semana empiece en Lunes (0 = Lunes, 6 = Domingo)
-  const offsetLunes = diaInicioSemana === 0 ? 6 : diaInicioSemana - 1;
+  // Citas relevantes según si hay perfil activo
+  const citasFiltradas = citas.filter(c => {
+    const coincidePersona = personaEnPerfil ? c.persona_id === personaEnPerfil.id : true;
+    const coincideDia = diaSeleccionado ? c.fecha_hora.startsWith(diaSeleccionado) : true;
+    return coincidePersona && coincideDia;
+  });
 
-  const totalDias = ultimoDiaMes.getDate();
-  const celdasCalendario: Array<{ dia: number | null; fechaIso: string | null }> = [];
+  // Generador de celdas para el Calendario (Semanal o Mensual)
+  const anio = fechaReferencia.getFullYear();
+  const mes = fechaReferencia.getMonth();
 
-  // Espacios vacíos antes del 1er día
-  for (let i = 0; i < offsetLunes; i++) {
-    celdasCalendario.push({ dia: null, fechaIso: null });
+  // Calcular días según modo
+  let celdasCalendario: Array<{ dia: number; fechaIso: string; nombreDia: string }> = [];
+
+  const formatoIsoFecha = (fecha: Date) => {
+    const y = fecha.getFullYear();
+    const m = String(fecha.getMonth() + 1).padStart(2, '0');
+    const d = String(fecha.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const diasSemanaNombres = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB'];
+
+  if (modoCalendario === 'semana') {
+    // Encontrar el lunes de la semana de fechaReferencia
+    const diaActualSemana = fechaReferencia.getDay(); // 0 Dom, 1 Lun...
+    const distanciaAlLunes = diaActualSemana === 0 ? -6 : 1 - diaActualSemana;
+    const lunes = new Date(fechaReferencia);
+    lunes.setDate(fechaReferencia.getDate() + distanciaAlLunes);
+
+    for (let i = 0; i < 7; i++) {
+      const fechaDia = new Date(lunes);
+      fechaDia.setDate(lunes.getDate() + i);
+      celdasCalendario.push({
+        dia: fechaDia.getDate(),
+        fechaIso: formatoIsoFecha(fechaDia),
+        nombreDia: diasSemanaNombres[fechaDia.getDay()]
+      });
+    }
+  } else {
+    // Mes Completo
+    const primerDiaMes = new Date(anio, mes, 1);
+    const ultimoDiaMes = new Date(anio, mes + 1, 0);
+    const diaInicio = primerDiaMes.getDay();
+    const offsetLunes = diaInicio === 0 ? 6 : diaInicio - 1;
+
+    // Rellenar días del mes anterior si hace falta para empezar en lunes
+    for (let i = offsetLunes; i > 0; i--) {
+      const f = new Date(anio, mes, 1 - i);
+      celdasCalendario.push({
+        dia: f.getDate(),
+        fechaIso: formatoIsoFecha(f),
+        nombreDia: diasSemanaNombres[f.getDay()]
+      });
+    }
+
+    // Días del mes
+    for (let d = 1; d <= ultimoDiaMes.getDate(); d++) {
+      const f = new Date(anio, mes, d);
+      celdasCalendario.push({
+        dia: d,
+        fechaIso: formatoIsoFecha(f),
+        nombreDia: diasSemanaNombres[f.getDay()]
+      });
+    }
   }
 
-  // Días reales del mes
-  for (let d = 1; d <= totalDias; d++) {
-    const mesStr = String(mes + 1).padStart(2, '0');
-    const diaStr = String(d).padStart(2, '0');
-    celdasCalendario.push({ 
-      dia: d, 
-      fechaIso: `${anio}-${mesStr}-${diaStr}` 
-    });
-  }
+  // Navegación de fecha
+  const moverFecha = (direccion: number) => {
+    const nueva = new Date(fechaReferencia);
+    if (modoCalendario === 'semana') {
+      nueva.setDate(nueva.getDate() + (direccion * 7));
+    } else {
+      nueva.setMonth(nueva.getMonth() + direccion);
+    }
+    setFechaReferencia(nueva);
+  };
 
   const nombresMeses = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
   ];
 
-  // Filtros
-  const citasFiltradas = citas.filter(c => {
-    const coincidePersona = filtroPersona === 'todos' ? true : c.persona_id === filtroPersona;
-    const coincideDia = diaSeleccionado ? c.fecha_hora.startsWith(diaSeleccionado) : true;
-    return coincidePersona && coincideDia;
-  });
-
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 antialiased p-3 sm:p-6 lg:p-8">
-      <div className="max-w-6xl mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-5">
         
-        {/* Encabezado */}
+        {/* Cabecera Principal / Navegación de Perfil */}
         <header className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className="p-3 bg-emerald-100 text-emerald-700 rounded-2xl shadow-sm">
-              <HeartHandshake className="w-7 h-7" />
-            </span>
+            {personaEnPerfil ? (
+              <button
+                onClick={() => { setPersonaEnPerfil(null); setDiaSeleccionado(null); }}
+                className="p-3 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-2xl transition flex items-center gap-1 font-bold text-xs"
+                title="Volver a toda la familia"
+              >
+                <ArrowLeft className="w-5 h-5" />
+                <span className="hidden sm:inline">Volver</span>
+              </button>
+            ) : (
+              <span className="p-3 bg-emerald-100 text-emerald-700 rounded-2xl shadow-sm">
+                <HeartHandshake className="w-7 h-7" />
+              </span>
+            )}
+
             <div>
-              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Citas Médicas Familia</h1>
-              <p className="text-slate-500 text-xs mt-0.5">
-                Calendario de salud, citas y turnos de acompañamiento para los abuelos y tías.
-              </p>
+              {personaEnPerfil ? (
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold uppercase tracking-wide">
+                      Perfil Paciente
+                    </span>
+                    <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                      {personaEnPerfil.nombre}
+                    </h1>
+                  </div>
+                  <p className="text-slate-500 text-xs mt-0.5">
+                    {personaEnPerfil.parentesco} • EPS: {personaEnPerfil.eps || 'No registrada'} 
+                    {personaEnPerfil.telefono && ` • Tel: ${personaEnPerfil.telefono}`}
+                    {personaEnPerfil.notas && ` • Nota: ${personaEnPerfil.notas}`}
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Citas Médicas Familia</h1>
+                  <p className="text-slate-500 text-xs mt-0.5">
+                    Coordinación de salud y acompañantes para los abuelos y tías.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {!personaEnPerfil && (
+              <>
+                <button 
+                  onClick={() => setModalPersonaAbierto(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-xs transition"
+                >
+                  <User className="w-4 h-4 text-slate-500" />
+                  + Persona
+                </button>
+                <button 
+                  onClick={() => setModalNietoAbierto(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-xs transition"
+                >
+                  <Users className="w-4 h-4 text-slate-500" />
+                  + Nieto / Acompañante
+                </button>
+              </>
+            )}
+            
             <button 
-              onClick={() => setModalPersonaAbierto(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-xs transition"
-            >
-              <User className="w-4 h-4 text-slate-500" />
-              + Persona
-            </button>
-            <button 
-              onClick={() => setModalNietoAbierto(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-xs transition"
-            >
-              <Users className="w-4 h-4 text-slate-500" />
-              + Nieto / Acompañante
-            </button>
-            <button 
-              onClick={() => setModalCitaAbierto(true)}
+              onClick={() => {
+                if (personaEnPerfil) setNuevaCita({ ...nuevaCita, persona_id: personaEnPerfil.id });
+                setModalCitaAbierto(true);
+              }}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-sm transition"
             >
               <Plus className="w-4 h-4" />
-              + Programar Cita
+              + Programar Cita {personaEnPerfil ? `a ${personaEnPerfil.nombre.split(' ')[0]}` : ''}
             </button>
           </div>
         </header>
 
+        {/* Selector Rápido de Pacientes (Pestañas) */}
+        <div className="bg-white rounded-2xl p-3 shadow-sm border border-slate-200 flex items-center justify-between gap-3 overflow-x-auto text-xs">
+          <div className="flex items-center gap-2 flex-nowrap">
+            <span className="font-bold text-slate-400 uppercase tracking-wider pl-1 text-[11px]">Ver:</span>
+            <button 
+              onClick={() => { setPersonaEnPerfil(null); setDiaSeleccionado(null); }}
+              className={`px-3.5 py-1.5 rounded-xl font-bold transition whitespace-nowrap ${
+                !personaEnPerfil 
+                  ? 'bg-slate-900 text-white shadow-sm' 
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              Toda la Familia ({citas.length})
+            </button>
+            {personas.map(p => {
+              const cantCitas = citas.filter(c => c.persona_id === p.id).length;
+              const estaActivo = personaEnPerfil?.id === p.id;
+              return (
+                <button 
+                  key={p.id}
+                  onClick={() => { setPersonaEnPerfil(p); setDiaSeleccionado(null); }}
+                  className={`px-3.5 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                    estaActivo 
+                      ? 'bg-blue-600 text-white shadow-sm' 
+                      : 'bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-700'
+                  }`}
+                >
+                  <User className="w-3.5 h-3.5 opacity-80" />
+                  {p.nombre} ({cantCitas})
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {guardando && (
+              <span className="text-emerald-600 font-semibold flex items-center gap-1 text-[11px]">
+                <RefreshCw className="w-3 h-3 animate-spin" /> Guardando...
+              </span>
+            )}
+            <button 
+              onClick={cargarDatos}
+              title="Refrescar citas"
+              className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${cargando ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+        </div>
+
         {/* ======================================================== */}
-        {/* VISTA DE CALENDARIO MENSUAL ARRIBA                       */}
+        {/* CALENDARIO COMPACTO: SEMANAL POR DEFECTO CON BOTÓN MES   */}
         {/* ======================================================== */}
         <section className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <CalendarIcon className="w-5 h-5 text-blue-600" />
-              <h2 className="text-lg font-bold text-slate-900">
-                {nombresMeses[mes]} {anio}
+              <h2 className="text-base sm:text-lg font-bold text-slate-900">
+                {modoCalendario === 'semana' 
+                  ? `Semana de ${nombresMeses[mes]} ${anio}` 
+                  : `${nombresMeses[mes]} ${anio}`}
               </h2>
+              {personaEnPerfil && (
+                <span className="text-xs font-semibold px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg">
+                  Solo {personaEnPerfil.nombre}
+                </span>
+              )}
               {diaSeleccionado && (
-                <span className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 bg-blue-100 text-blue-800 rounded-full font-semibold">
-                  Filtrando: {diaSeleccionado}
-                  <button onClick={() => setDiaSeleccionado(null)} className="hover:text-blue-900">
+                <span className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 bg-slate-900 text-white rounded-full font-semibold">
+                  Día: {diaSeleccionado}
+                  <button onClick={() => setDiaSeleccionado(null)} className="hover:text-amber-300">
                     <X className="w-3 h-3 ml-0.5" />
                   </button>
                 </span>
               )}
             </div>
 
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={() => setMesActual(new Date(anio, mes - 1, 1))}
-                className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-600 transition"
-                title="Mes anterior"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button 
-                onClick={() => setMesActual(new Date(anio, mes + 1, 1))}
-                className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-600 transition"
-                title="Mes siguiente"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-              <button 
-                onClick={() => { setMesActual(new Date()); setDiaSeleccionado(null); }}
-                className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition"
-              >
-                Hoy
-              </button>
+            {/* Controles de vista y navegación */}
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              {/* Interruptor Semana / Mes */}
+              <div className="bg-slate-100 p-0.5 rounded-xl flex items-center text-xs font-bold">
+                <button
+                  onClick={() => setModoCalendario('semana')}
+                  className={`px-3 py-1 rounded-lg transition flex items-center gap-1 ${
+                    modoCalendario === 'semana' 
+                      ? 'bg-white text-slate-900 shadow-xs' 
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <CalendarDays className="w-3.5 h-3.5" />
+                  Semana
+                </button>
+                <button
+                  onClick={() => setModoCalendario('mes')}
+                  className={`px-3 py-1 rounded-lg transition flex items-center gap-1 ${
+                    modoCalendario === 'mes' 
+                      ? 'bg-white text-slate-900 shadow-xs' 
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  Mes completo
+                </button>
+              </div>
+
+              {/* Botones de navegación */}
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={() => moverFecha(-1)}
+                  className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-600 transition"
+                  title={modoCalendario === 'semana' ? 'Semana anterior' : 'Mes anterior'}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button 
+                  onClick={() => moverFecha(1)}
+                  className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-600 transition"
+                  title={modoCalendario === 'semana' ? 'Semana siguiente' : 'Mes siguiente'}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+                <button 
+                  onClick={() => { setFechaReferencia(new Date(2026, 9, 12)); setDiaSeleccionado(null); }}
+                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition"
+                >
+                  Hoy
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Cuadrícula de días */}
-          <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center text-xs">
-            {['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'].map(d => (
-              <div key={d} className="font-bold text-slate-400 py-1.5 tracking-wider uppercase text-[11px]">
-                {d}
-              </div>
-            ))}
-
+          {/* Cuadrícula del Calendario */}
+          <div className={`grid gap-1.5 sm:gap-2 text-center text-xs ${
+            modoCalendario === 'semana' ? 'grid-cols-7' : 'grid-cols-7'
+          }`}>
             {celdasCalendario.map((celda, idx) => {
-              if (!celda.dia) {
-                return <div key={`empty-${idx}`} className="min-h-[85px] sm:min-h-[105px] bg-slate-50/50 rounded-2xl border border-transparent" />;
-              }
+              // Filtrar citas según si estamos en modo perfil o global
+              const citasDelDia = citas.filter(c => {
+                const coincideFecha = c.fecha_hora.startsWith(celda.fechaIso);
+                const coincidePersona = personaEnPerfil ? c.persona_id === personaEnPerfil.id : true;
+                return coincideFecha && coincidePersona;
+              });
 
-              const citasDelDia = citas.filter(c => c.fecha_hora.startsWith(celda.fechaIso || ''));
               const esSeleccionado = diaSeleccionado === celda.fechaIso;
               const esHoy = celda.fechaIso === hoyIso;
 
               return (
                 <div
-                  key={celda.fechaIso}
+                  key={`${celda.fechaIso}-${idx}`}
                   onClick={() => setDiaSeleccionado(esSeleccionado ? null : celda.fechaIso)}
-                  className={`min-h-[85px] sm:min-h-[105px] p-1.5 sm:p-2 rounded-2xl border text-left flex flex-col justify-between transition cursor-pointer ${
+                  className={`p-2 rounded-2xl border text-left flex flex-col justify-between transition cursor-pointer ${
+                    modoCalendario === 'semana' ? 'min-h-[110px] sm:min-h-[135px]' : 'min-h-[85px] sm:min-h-[105px]'
+                  } ${
                     esSeleccionado
-                      ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-500/20'
+                      ? 'border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20'
                       : esHoy
-                      ? 'border-slate-300 bg-amber-50/30 hover:border-slate-400'
+                      ? 'border-amber-300 bg-amber-50/40 hover:border-amber-400'
                       : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded-lg ${
-                      esHoy ? 'bg-amber-500 text-white' : 'text-slate-700'
-                    }`}>
-                      {celda.dia}
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        {celda.nombreDia}
+                      </span>
+                      <span className={`text-xs font-bold px-1.5 py-0.5 rounded-lg ${
+                        esHoy ? 'bg-amber-500 text-white' : 'text-slate-800'
+                      }`}>
+                        {celda.dia}
+                      </span>
+                    </div>
+
                     {citasDelDia.length > 0 && (
-                      <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
-                        {citasDelDia.length} {citasDelDia.length === 1 ? 'cita' : 'citas'}
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                        {citasDelDia.length}
                       </span>
                     )}
                   </div>
 
-                  {/* Pastillas de citas del día */}
+                  {/* Pastillas de citas */}
                   <div className="space-y-1 mt-1 overflow-hidden">
-                    {citasDelDia.slice(0, 2).map(c => {
+                    {citasDelDia.map(c => {
                       const paciente = personas.find(p => p.id === c.persona_id);
                       const hora = new Date(c.fecha_hora).toLocaleTimeString('es-CO', { 
                         hour: 'numeric', 
@@ -452,10 +638,10 @@ export default function Home() {
                       return (
                         <div
                           key={c.id}
-                          className={`px-1.5 py-1 rounded-xl text-[10px] sm:text-[11px] font-semibold truncate border ${
+                          className={`px-1.5 py-1 rounded-xl text-[10px] font-semibold border leading-tight ${
                             estaAcompanada
                               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                              : 'bg-amber-50 text-amber-900 border-amber-300'
+                              : 'bg-amber-50 text-amber-900 border-amber-300 animate-pulse'
                           }`}
                           title={`${c.especialidad} - ${paciente?.nombre} (${hora})`}
                         >
@@ -463,17 +649,17 @@ export default function Home() {
                             <span className="truncate">{c.especialidad.split(' ')[0]}</span>
                             <span className="text-[9px] text-slate-500 font-normal shrink-0">{hora}</span>
                           </div>
-                          <div className="text-[9px] truncate opacity-80">
-                            {paciente?.nombre?.split(' ')[0]} {estaAcompanada ? `(✅ ${c.acompanante})` : '⚠️ Falta'}
+                          {!personaEnPerfil && (
+                            <div className="text-[9px] font-normal truncate opacity-80 mt-0.5">
+                              {paciente?.nombre?.split(' ')[0]}
+                            </div>
+                          )}
+                          <div className="text-[9px] truncate font-bold mt-0.5">
+                            {estaAcompanada ? `✅ ${c.acompanante}` : '⚠️ Sin nieto'}
                           </div>
                         </div>
                       );
                     })}
-                    {citasDelDia.length > 2 && (
-                      <div className="text-[10px] text-slate-400 font-semibold text-center">
-                        +{citasDelDia.length - 2} más
-                      </div>
-                    )}
                   </div>
                 </div>
               );
@@ -481,76 +667,24 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Barra de Acompañantes y Filtros */}
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-slate-600 flex items-center gap-1">
-              <Users className="w-4 h-4 text-blue-500" /> Acompañantes listos:
-            </span>
-            {nietos.map(n => (
-              <span key={n.id} className="px-2.5 py-1 bg-blue-50 text-blue-700 font-medium rounded-lg border border-blue-100">
-                {n.nombre}
-              </span>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-2">
-            {guardando && (
-              <span className="text-emerald-600 font-semibold flex items-center gap-1">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Guardando en nube...
-              </span>
-            )}
-            <button 
-              onClick={cargarDatos}
-              title="Refrescar datos"
-              className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
-            >
-              <RefreshCw className={`w-4 h-4 ${cargando ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
-        </div>
-
-        {/* Filtros rápidos por paciente */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider pl-1">Filtrar:</span>
-          <button 
-            onClick={() => { setFiltroPersona('todos'); setDiaSeleccionado(null); }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
-              filtroPersona === 'todos' && !diaSeleccionado
-                ? 'bg-slate-900 text-white' 
-                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-            }`}
-          >
-            Todas las citas ({citas.length})
-          </button>
-          {personas.map(p => (
-            <button 
-              key={p.id}
-              onClick={() => setFiltroPersona(p.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
-                filtroPersona === p.id 
-                  ? 'bg-slate-900 text-white' 
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              {p.nombre} ({citas.filter(c => c.persona_id === p.id).length})
-            </button>
-          ))}
-        </div>
-
-        {/* Listado de Tarjetas de Citas Detalladas */}
+        {/* ======================================================== */}
+        {/* LISTADO DE TARJETAS DE CITAS DETALLADAS                  */}
+        {/* ======================================================== */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
               <Clock className="w-4 h-4 text-blue-600" />
-              Detalle de Citas {diaSeleccionado ? `para el ${diaSeleccionado}` : ''}
+              {personaEnPerfil 
+                ? `Citas de ${personaEnPerfil.nombre}` 
+                : 'Todas las Citas Médicas'} 
+              {diaSeleccionado ? ` (${diaSeleccionado})` : ''}
             </h2>
             {diaSeleccionado && (
               <button 
                 onClick={() => setDiaSeleccionado(null)}
                 className="text-xs text-blue-600 hover:underline font-semibold"
               >
-                Ver todos los días
+                Ver todas las fechas
               </button>
             )}
           </div>
@@ -558,8 +692,18 @@ export default function Home() {
           {citasFiltradas.length === 0 ? (
             <div className="bg-white rounded-3xl p-10 text-center border border-dashed border-slate-300">
               <CalendarIcon className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-              <p className="text-slate-600 font-medium text-sm">No hay citas registradas para este filtro.</p>
-              <p className="text-slate-400 text-xs mt-1">Hacé clic en "+ Programar Cita" arriba.</p>
+              <p className="text-slate-600 font-medium text-sm">
+                No hay citas registradas {personaEnPerfil ? `para ${personaEnPerfil.nombre}` : ''} {diaSeleccionado ? `en esta fecha` : ''}.
+              </p>
+              <button
+                onClick={() => {
+                  if (personaEnPerfil) setNuevaCita({ ...nuevaCita, persona_id: personaEnPerfil.id });
+                  setModalCitaAbierto(true);
+                }}
+                className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold"
+              >
+                <Plus className="w-4 h-4" /> Programar Cita Ahora
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -583,18 +727,31 @@ export default function Home() {
                     className="bg-white rounded-3xl p-5 shadow-sm border border-slate-200 flex flex-col justify-between hover:shadow-md transition"
                   >
                     <div className="space-y-3">
-                      {/* Cabecera */}
+                      {/* Cabecera con clic para entrar al perfil del paciente */}
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700">
                             {cita.especialidad}
                           </span>
-                          <h3 className="text-lg font-bold text-slate-900 mt-1">
-                            {paciente?.nombre || 'Familiar'}
-                          </h3>
-                          <p className="text-xs text-slate-500">
-                            {paciente?.parentesco} • EPS: {paciente?.eps || 'No registrada'}
-                          </p>
+                          
+                          {/* Nombre del paciente con clic para entrar a su perfil */}
+                          <button
+                            onClick={() => {
+                              if (paciente) setPersonaEnPerfil(paciente);
+                            }}
+                            className="text-left group block mt-1"
+                            title="Hacé clic para ver el perfil exclusivo de esta persona"
+                          >
+                            <h3 className="text-lg font-bold text-slate-900 group-hover:text-blue-600 transition flex items-center gap-1.5">
+                              {paciente?.nombre || 'Familiar'}
+                              <span className="text-[11px] font-normal text-blue-500 opacity-0 group-hover:opacity-100 transition">
+                                (Ver perfil 👤)
+                              </span>
+                            </h3>
+                            <p className="text-xs text-slate-500">
+                              {paciente?.parentesco} • EPS: {paciente?.eps || 'No registrada'}
+                            </p>
+                          </button>
                         </div>
 
                         {tieneAcompanante ? (
@@ -610,7 +767,7 @@ export default function Home() {
                         )}
                       </div>
 
-                      {/* Detalles */}
+                      {/* Detalles de la cita */}
                       <div className="space-y-1.5 text-xs text-slate-600 bg-slate-50 p-3 rounded-2xl border border-slate-100">
                         <div className="flex items-center gap-2">
                           <Clock className="w-4 h-4 text-slate-400" />
@@ -636,8 +793,8 @@ export default function Home() {
                           </div>
                         )}
                         {cita.notas && (
-                          <div className="text-slate-500 pl-6 italic">
-                            Nota: {cita.notas}
+                          <div className="text-slate-600 font-medium pl-6 italic bg-amber-50/50 p-1.5 rounded-lg border border-amber-100">
+                            💡 {cita.notas}
                           </div>
                         )}
                       </div>
@@ -714,7 +871,9 @@ export default function Home() {
           )}
         </div>
 
-        {/* Modal Confirmación Doble de WhatsApp tras postularse */}
+        {/* ======================================================== */}
+        {/* MODAL CONFIRMACIÓN DOBLE WHATSAPP TRAS POSTULARSE        */}
+        {/* ======================================================== */}
         {modalExitoWhatsApp && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
@@ -739,7 +898,6 @@ export default function Home() {
               </p>
 
               <div className="space-y-2 pt-1">
-                {/* Botón 1: Grupo Familiar */}
                 <button
                   onClick={() => {
                     enviarWhatsAppGrupo(
@@ -757,7 +915,6 @@ export default function Home() {
                   <span>👉</span>
                 </button>
 
-                {/* Botón 2: Al teléfono del paciente */}
                 <button
                   onClick={() => {
                     enviarWhatsAppPaciente(
@@ -917,13 +1074,15 @@ export default function Home() {
         {modalCitaAbierto && (
           <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-xl border border-slate-200">
-              <h3 className="text-base font-bold text-slate-900 mb-3">Programar Cita Médica</h3>
+              <h3 className="text-base font-bold text-slate-900 mb-3">
+                Programar Cita Médica {personaEnPerfil ? `para ${personaEnPerfil.nombre}` : ''}
+              </h3>
               <form onSubmit={handleGuardarCita} className="space-y-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Paciente</label>
                   <select 
                     required 
-                    value={nuevaCita.persona_id}
+                    value={nuevaCita.persona_id || personaEnPerfil?.id || ''}
                     onChange={e => setNuevaCita({ ...nuevaCita, persona_id: e.target.value })}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
