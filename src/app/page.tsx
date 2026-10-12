@@ -16,14 +16,15 @@ import {
   Users, 
   RefreshCw, 
   ChevronLeft, 
-  ChevronRight,
-  Phone,
-  MessageCircle,
-  X,
-  ArrowLeft,
-  Maximize2,
-  Minimize2,
-  CalendarDays
+  ChevronRight, 
+  Phone, 
+  MessageCircle, 
+  X, 
+  ArrowLeft, 
+  Maximize2, 
+  CalendarDays,
+  Copy,
+  Link as LinkIcon
 } from 'lucide-react';
 
 interface Persona {
@@ -64,6 +65,7 @@ export default function Home() {
   
   // Perfil individual seleccionado
   const [personaEnPerfil, setPersonaEnPerfil] = useState<Persona | null>(null);
+  const [mensajeCopiado, setMensajeCopiado] = useState(false);
 
   // Modo de calendario: 'semana' por defecto
   const [modoCalendario, setModoCalendario] = useState<'semana' | 'mes'>('semana');
@@ -112,16 +114,27 @@ export default function Home() {
     notas: ''
   });
 
-  // Cargar datos desde la nube
+  // Cargar datos y sincronizar con la URL
   const cargarDatos = async () => {
     setCargando(true);
     try {
       const res = await fetch('/api/db');
       if (res.ok) {
         const data = await res.json();
-        setPersonas(data.personas || []);
+        const listaPersonas: Persona[] = data.personas || [];
+        setPersonas(listaPersonas);
         setNietos(data.nietos || []);
         setCitas(data.citas || []);
+
+        // Leer parámetro de URL ?paciente=ID
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          const pacienteParam = params.get('paciente');
+          if (pacienteParam) {
+            const encontrado = listaPersonas.find(p => p.id === pacienteParam || p.nombre.toLowerCase().includes(pacienteParam.toLowerCase()));
+            if (encontrado) setPersonaEnPerfil(encontrado);
+          }
+        }
       }
     } catch (err) {
       console.error('Error cargando datos:', err);
@@ -133,6 +146,43 @@ export default function Home() {
   useEffect(() => {
     cargarDatos();
   }, []);
+
+  // Manejar cambio de perfil y actualizar URL
+  const seleccionarPerfil = (p: Persona | null) => {
+    setPersonaEnPerfil(p);
+    setDiaSeleccionado(null);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (p) {
+        url.searchParams.set('paciente', p.id);
+      } else {
+        url.searchParams.delete('paciente');
+      }
+      window.history.pushState({}, '', url.toString());
+    }
+  };
+
+  // Copiar link directo al perfil
+  const copiarEnlacePerfil = () => {
+    if (typeof window !== 'undefined' && personaEnPerfil) {
+      const link = `${window.location.origin}?paciente=${personaEnPerfil.id}`;
+      navigator.clipboard.writeText(link);
+      setMensajeCopiado(true);
+      setTimeout(() => setMensajeCopiado(false), 2500);
+    }
+  };
+
+  // Compartir ficha por WhatsApp
+  const compartirFichaWhatsApp = () => {
+    if (typeof window !== 'undefined' && personaEnPerfil) {
+      const link = `${window.location.origin}?paciente=${personaEnPerfil.id}`;
+      const citasPersona = citas.filter(c => c.persona_id === personaEnPerfil.id);
+      const texto = `👵 *Citas Médicas de ${personaEnPerfil.nombre}*\n\n` +
+        `Tiene ${citasPersona.length} citas programadas.\n` +
+        `🔗 Abrí este enlace directo para ver su calendario y postularte como acompañante:\n${link}`;
+      window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+    }
+  };
 
   const sincronizar = async (nuevasPersonas = personas, nuevosNietos = nietos, nuevasCitas = citas) => {
     setGuardando(true);
@@ -242,13 +292,15 @@ export default function Home() {
       minute: '2-digit' 
     });
 
+    const linkApp = typeof window !== 'undefined' ? `${window.location.origin}?paciente=${paciente.id}` : '';
+
     const texto = `✅ *¡Buenas noticias!* ${acompanante} confirmó que acompaña a:\n\n` +
       `👵 *Paciente:* ${paciente.nombre}\n` +
       `🩺 *Especialidad:* ${cita.especialidad}\n` +
       `🗓️ *Fecha:* ${fecha}\n` +
       `📍 *Lugar:* ${cita.lugar} (${cita.direccion || 'Sin dirección'})\n` +
       (cita.notas ? `📝 *Notas:* ${cita.notas}\n` : '') +
-      `\n🔗 Registrado en la app médica familiar.`;
+      `\n🔗 Ver ficha familiar: ${linkApp}`;
 
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
   };
@@ -286,11 +338,10 @@ export default function Home() {
     return coincidePersona && coincideDia;
   });
 
-  // Generador de celdas para el Calendario (Semanal o Mensual)
+  // Generador de celdas para el Calendario
   const anio = fechaReferencia.getFullYear();
   const mes = fechaReferencia.getMonth();
 
-  // Calcular días según modo
   let celdasCalendario: Array<{ dia: number; fechaIso: string; nombreDia: string }> = [];
 
   const formatoIsoFecha = (fecha: Date) => {
@@ -303,8 +354,7 @@ export default function Home() {
   const diasSemanaNombres = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB'];
 
   if (modoCalendario === 'semana') {
-    // Encontrar el lunes de la semana de fechaReferencia
-    const diaActualSemana = fechaReferencia.getDay(); // 0 Dom, 1 Lun...
+    const diaActualSemana = fechaReferencia.getDay();
     const distanciaAlLunes = diaActualSemana === 0 ? -6 : 1 - diaActualSemana;
     const lunes = new Date(fechaReferencia);
     lunes.setDate(fechaReferencia.getDate() + distanciaAlLunes);
@@ -319,13 +369,11 @@ export default function Home() {
       });
     }
   } else {
-    // Mes Completo
     const primerDiaMes = new Date(anio, mes, 1);
     const ultimoDiaMes = new Date(anio, mes + 1, 0);
     const diaInicio = primerDiaMes.getDay();
     const offsetLunes = diaInicio === 0 ? 6 : diaInicio - 1;
 
-    // Rellenar días del mes anterior si hace falta para empezar en lunes
     for (let i = offsetLunes; i > 0; i--) {
       const f = new Date(anio, mes, 1 - i);
       celdasCalendario.push({
@@ -335,7 +383,6 @@ export default function Home() {
       });
     }
 
-    // Días del mes
     for (let d = 1; d <= ultimoDiaMes.getDate(); d++) {
       const f = new Date(anio, mes, d);
       celdasCalendario.push({
@@ -346,7 +393,6 @@ export default function Home() {
     }
   }
 
-  // Navegación de fecha
   const moverFecha = (direccion: number) => {
     const nueva = new Date(fechaReferencia);
     if (modoCalendario === 'semana') {
@@ -366,12 +412,20 @@ export default function Home() {
     <div className="min-h-screen bg-slate-50 text-slate-800 antialiased p-3 sm:p-6 lg:p-8">
       <div className="max-w-6xl mx-auto space-y-5">
         
-        {/* Cabecera Principal / Navegación de Perfil */}
-        <header className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        {/* Toast Notificación Copiado */}
+        {mensajeCopiado && (
+          <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-xl text-xs font-bold flex items-center gap-2 animate-fade-in">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            ¡Enlace de {personaEnPerfil?.nombre} copiado al portapapeles!
+          </div>
+        )}
+
+        {/* Cabecera Principal / Navegación de Perfil con Animación */}
+        <header className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all duration-300">
           <div className="flex items-center gap-3">
             {personaEnPerfil ? (
               <button
-                onClick={() => { setPersonaEnPerfil(null); setDiaSeleccionado(null); }}
+                onClick={() => seleccionarPerfil(null)}
                 className="p-3 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-2xl transition flex items-center gap-1 font-bold text-xs"
                 title="Volver a toda la familia"
               >
@@ -384,10 +438,10 @@ export default function Home() {
               </span>
             )}
 
-            <div>
+            <div key={personaEnPerfil?.id || 'familiar'} className="animate-fade-in">
               {personaEnPerfil ? (
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold uppercase tracking-wide">
                       Perfil Paciente
                     </span>
@@ -413,7 +467,26 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {!personaEnPerfil && (
+            {personaEnPerfil ? (
+              <>
+                <button 
+                  onClick={copiarEnlacePerfil}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-xs transition"
+                  title="Copiar link para enviar"
+                >
+                  <Copy className="w-4 h-4 text-slate-500" />
+                  Copiar Enlace
+                </button>
+                <button 
+                  onClick={compartirFichaWhatsApp}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl font-bold text-xs transition"
+                  title="Enviar ficha por WhatsApp"
+                >
+                  <Share2 className="w-4 h-4 text-emerald-600" />
+                  Compartir en WhatsApp
+                </button>
+              </>
+            ) : (
               <>
                 <button 
                   onClick={() => setModalPersonaAbierto(true)}
@@ -445,12 +518,12 @@ export default function Home() {
           </div>
         </header>
 
-        {/* Selector Rápido de Pacientes (Pestañas) */}
+        {/* Pestañas de Pacientes (Deep Linking con URL) */}
         <div className="bg-white rounded-2xl p-3 shadow-sm border border-slate-200 flex items-center justify-between gap-3 overflow-x-auto text-xs">
           <div className="flex items-center gap-2 flex-nowrap">
             <span className="font-bold text-slate-400 uppercase tracking-wider pl-1 text-[11px]">Ver:</span>
             <button 
-              onClick={() => { setPersonaEnPerfil(null); setDiaSeleccionado(null); }}
+              onClick={() => seleccionarPerfil(null)}
               className={`px-3.5 py-1.5 rounded-xl font-bold transition whitespace-nowrap ${
                 !personaEnPerfil 
                   ? 'bg-slate-900 text-white shadow-sm' 
@@ -465,10 +538,10 @@ export default function Home() {
               return (
                 <button 
                   key={p.id}
-                  onClick={() => { setPersonaEnPerfil(p); setDiaSeleccionado(null); }}
+                  onClick={() => seleccionarPerfil(p)}
                   className={`px-3.5 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
                     estaActivo 
-                      ? 'bg-blue-600 text-white shadow-sm' 
+                      ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-400/30' 
                       : 'bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-700'
                   }`}
                 >
@@ -496,9 +569,9 @@ export default function Home() {
         </div>
 
         {/* ======================================================== */}
-        {/* CALENDARIO COMPACTO: SEMANAL POR DEFECTO CON BOTÓN MES   */}
+        {/* CALENDARIO CON TRANSICIÓN SUAVE (SEMANA / MES COMPLETO) */}
         {/* ======================================================== */}
-        <section className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-4">
+        <section className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-4 transition-all duration-300">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2 flex-wrap">
               <CalendarIcon className="w-5 h-5 text-blue-600" />
@@ -524,11 +597,11 @@ export default function Home() {
 
             {/* Controles de vista y navegación */}
             <div className="flex items-center gap-2 self-end sm:self-auto">
-              {/* Interruptor Semana / Mes */}
+              {/* Interruptor Semana / Mes con animación */}
               <div className="bg-slate-100 p-0.5 rounded-xl flex items-center text-xs font-bold">
                 <button
                   onClick={() => setModoCalendario('semana')}
-                  className={`px-3 py-1 rounded-lg transition flex items-center gap-1 ${
+                  className={`px-3 py-1 rounded-lg transition-all duration-200 flex items-center gap-1 ${
                     modoCalendario === 'semana' 
                       ? 'bg-white text-slate-900 shadow-xs' 
                       : 'text-slate-500 hover:text-slate-800'
@@ -539,7 +612,7 @@ export default function Home() {
                 </button>
                 <button
                   onClick={() => setModoCalendario('mes')}
-                  className={`px-3 py-1 rounded-lg transition flex items-center gap-1 ${
+                  className={`px-3 py-1 rounded-lg transition-all duration-200 flex items-center gap-1 ${
                     modoCalendario === 'mes' 
                       ? 'bg-white text-slate-900 shadow-xs' 
                       : 'text-slate-500 hover:text-slate-800'
@@ -576,12 +649,12 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Cuadrícula del Calendario */}
-          <div className={`grid gap-1.5 sm:gap-2 text-center text-xs ${
-            modoCalendario === 'semana' ? 'grid-cols-7' : 'grid-cols-7'
-          }`}>
+          {/* Cuadrícula del Calendario con animación expand */}
+          <div 
+            key={`${modoCalendario}-${fechaReferencia.toISOString()}`} 
+            className="grid gap-1.5 sm:gap-2 text-center text-xs grid-cols-7 animate-expand"
+          >
             {celdasCalendario.map((celda, idx) => {
-              // Filtrar citas según si estamos en modo perfil o global
               const citasDelDia = citas.filter(c => {
                 const coincideFecha = c.fecha_hora.startsWith(celda.fechaIso);
                 const coincidePersona = personaEnPerfil ? c.persona_id === personaEnPerfil.id : true;
@@ -595,11 +668,11 @@ export default function Home() {
                 <div
                   key={`${celda.fechaIso}-${idx}`}
                   onClick={() => setDiaSeleccionado(esSeleccionado ? null : celda.fechaIso)}
-                  className={`p-2 rounded-2xl border text-left flex flex-col justify-between transition cursor-pointer ${
+                  className={`p-2 rounded-2xl border text-left flex flex-col justify-between transition-all duration-200 cursor-pointer ${
                     modoCalendario === 'semana' ? 'min-h-[110px] sm:min-h-[135px]' : 'min-h-[85px] sm:min-h-[105px]'
                   } ${
                     esSeleccionado
-                      ? 'border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20'
+                      ? 'border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 shadow-xs'
                       : esHoy
                       ? 'border-amber-300 bg-amber-50/40 hover:border-amber-400'
                       : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50'
@@ -638,7 +711,7 @@ export default function Home() {
                       return (
                         <div
                           key={c.id}
-                          className={`px-1.5 py-1 rounded-xl text-[10px] font-semibold border leading-tight ${
+                          className={`px-1.5 py-1 rounded-xl text-[10px] font-semibold border leading-tight transition ${
                             estaAcompanada
                               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                               : 'bg-amber-50 text-amber-900 border-amber-300 animate-pulse'
@@ -668,9 +741,9 @@ export default function Home() {
         </section>
 
         {/* ======================================================== */}
-        {/* LISTADO DE TARJETAS DE CITAS DETALLADAS                  */}
+        {/* LISTADO DE TARJETAS DE CITAS CON ANIMACIÓN FADE-IN       */}
         {/* ======================================================== */}
-        <div className="space-y-4">
+        <div key={personaEnPerfil?.id || 'todas-citas'} className="space-y-4 animate-fade-in">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
               <Clock className="w-4 h-4 text-blue-600" />
@@ -724,7 +797,7 @@ export default function Home() {
                 return (
                   <div 
                     key={cita.id} 
-                    className="bg-white rounded-3xl p-5 shadow-sm border border-slate-200 flex flex-col justify-between hover:shadow-md transition"
+                    className="bg-white rounded-3xl p-5 shadow-sm border border-slate-200 flex flex-col justify-between hover:shadow-md transition-all duration-200"
                   >
                     <div className="space-y-3">
                       {/* Cabecera con clic para entrar al perfil del paciente */}
@@ -734,13 +807,13 @@ export default function Home() {
                             {cita.especialidad}
                           </span>
                           
-                          {/* Nombre del paciente con clic para entrar a su perfil */}
+                          {/* Botón hacia el perfil del paciente con deep link */}
                           <button
                             onClick={() => {
-                              if (paciente) setPersonaEnPerfil(paciente);
+                              if (paciente) seleccionarPerfil(paciente);
                             }}
                             className="text-left group block mt-1"
-                            title="Hacé clic para ver el perfil exclusivo de esta persona"
+                            title="Hacé clic para ver el perfil y calendario exclusivo de esta persona"
                           >
                             <h3 className="text-lg font-bold text-slate-900 group-hover:text-blue-600 transition flex items-center gap-1.5">
                               {paciente?.nombre || 'Familiar'}
@@ -802,7 +875,7 @@ export default function Home() {
 
                     {/* Selector de acompañante si se abre */}
                     {citaSeleccionadaParaAcompanar === cita.id && (
-                      <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-2">
+                      <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-2 animate-fade-in">
                         <p className="text-xs font-bold text-emerald-900">¿Quién va a acompañar?</p>
                         <div className="flex flex-wrap gap-1.5">
                           {nietos.map(n => (
@@ -876,7 +949,7 @@ export default function Home() {
         {/* ======================================================== */}
         {modalExitoWhatsApp && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-fade-in">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
