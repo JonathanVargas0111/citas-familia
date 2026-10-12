@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { 
-  Calendar, 
+  Calendar as CalendarIcon, 
   User, 
   MapPin, 
   Clock, 
@@ -10,11 +10,16 @@ import {
   UserCheck, 
   Share2, 
   HeartHandshake, 
-  CheckCircle2,
-  AlertCircle,
-  ExternalLink,
-  Users,
-  RefreshCw
+  CheckCircle2, 
+  AlertCircle, 
+  ExternalLink, 
+  Users, 
+  RefreshCw, 
+  ChevronLeft, 
+  ChevronRight,
+  Phone,
+  MessageCircle,
+  X
 } from 'lucide-react';
 
 interface Persona {
@@ -54,13 +59,26 @@ export default function Home() {
   const [guardando, setGuardando] = useState(false);
   const [filtroPersona, setFiltroPersona] = useState<string>('todos');
 
+  const [mesActual, setMesActual] = useState(new Date(2026, 9, 1)); // Octubre 2026
+  const [diaSeleccionado, setDiaSeleccionado] = useState<string | null>(null);
+  const [hoyIso, setHoyIso] = useState<string>('');
+
+  useEffect(() => {
+    setHoyIso(new Date().toISOString().split('T')[0]);
+  }, []);
+
   // Modales
   const [modalPersonaAbierto, setModalPersonaAbierto] = useState(false);
   const [modalNietoAbierto, setModalNietoAbierto] = useState(false);
   const [modalCitaAbierto, setModalCitaAbierto] = useState(false);
   const [citaSeleccionadaParaAcompanar, setCitaSeleccionadaParaAcompanar] = useState<string | null>(null);
+  const [modalExitoWhatsApp, setModalExitoWhatsApp] = useState<{
+    cita: Cita;
+    acompanante: string;
+    paciente: Persona;
+  } | null>(null);
 
-  // Formulario Persona
+  // Formularios
   const [nuevaPersona, setNuevaPersona] = useState({
     nombre: '',
     parentesco: '',
@@ -69,13 +87,11 @@ export default function Home() {
     notas: ''
   });
 
-  // Formulario Nieto
   const [nuevoNieto, setNuevoNieto] = useState({
     nombre: '',
     telefono: ''
   });
 
-  // Formulario Cita
   const [nuevaCita, setNuevaCita] = useState({
     persona_id: '',
     especialidad: '',
@@ -86,7 +102,7 @@ export default function Home() {
     notas: ''
   });
 
-  // Cargar datos desde la nube (Gist / API)
+  // Cargar datos desde la nube
   const cargarDatos = async () => {
     setCargando(true);
     try {
@@ -108,7 +124,6 @@ export default function Home() {
     cargarDatos();
   }, []);
 
-  // Guardar cambio en la nube
   const sincronizar = async (nuevasPersonas = personas, nuevosNietos = nietos, nuevasCitas = citas) => {
     setGuardando(true);
     try {
@@ -132,7 +147,6 @@ export default function Home() {
   const handleGuardarPersona = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nuevaPersona.nombre || !nuevaPersona.parentesco) return;
-
     const item: Persona = { id: Date.now().toString(), ...nuevaPersona };
     const actualizadas = [...personas, item];
     setPersonas(actualizadas);
@@ -141,11 +155,10 @@ export default function Home() {
     await sincronizar(actualizadas, nietos, citas);
   };
 
-  // Crear Nieto / Acompañante
+  // Crear Nieto
   const handleGuardarNieto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nuevoNieto.nombre) return;
-
     const item: Nieto = { id: Date.now().toString(), ...nuevoNieto };
     const actualizados = [...nietos, item];
     setNietos(actualizados);
@@ -158,7 +171,6 @@ export default function Home() {
   const handleGuardarCita = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nuevaCita.persona_id || !nuevaCita.especialidad || !nuevaCita.fecha_hora) return;
-
     const item: Cita = {
       id: Date.now().toString(),
       ...nuevaCita,
@@ -180,8 +192,17 @@ export default function Home() {
     await sincronizar(personas, nietos, actualizadas);
   };
 
-  // Asignar acompañante desde la lista de nietos
+  // Asignar acompañante y disparar confirmación WhatsApp
   const asignarAcompanante = async (citaId: string, nombreAcompanante: string) => {
+    const citaActual = citas.find(c => c.id === citaId);
+    if (!citaActual) return;
+
+    const paciente = personas.find(p => p.id === citaActual.persona_id) || {
+      id: '',
+      nombre: 'Familiar',
+      parentesco: 'Familiar'
+    };
+
     const actualizadas = citas.map(c => 
       c.id === citaId 
         ? { ...c, acompanante: nombreAcompanante, estado: 'acompanada' as const } 
@@ -190,11 +211,17 @@ export default function Home() {
     setCitas(actualizadas);
     setCitaSeleccionadaParaAcompanar(null);
     await sincronizar(personas, nietos, actualizadas);
+
+    // Abrir modal de WhatsApp doble
+    setModalExitoWhatsApp({
+      cita: { ...citaActual, acompanante: nombreAcompanante },
+      acompanante: nombreAcompanante,
+      paciente
+    });
   };
 
-  // Compartir en WhatsApp familiar
-  const compartirWhatsApp = (cita: Cita) => {
-    const paciente = personas.find(p => p.id === cita.persona_id)?.nombre || 'Familiar';
+  // Mensaje para el grupo familiar
+  const enviarWhatsAppGrupo = (cita: Cita, acompanante: string, paciente: Persona) => {
     const fecha = new Date(cita.fecha_hora).toLocaleString('es-CO', { 
       weekday: 'long', 
       day: 'numeric', 
@@ -203,57 +230,117 @@ export default function Home() {
       minute: '2-digit' 
     });
 
-    const texto = `🏥 *Cita Médica Familia*\n\n` +
-      `👤 *Paciente:* ${paciente}\n` +
+    const texto = `✅ *¡Buenas noticias!* ${acompanante} confirmó que acompaña a:\n\n` +
+      `👵 *Paciente:* ${paciente.nombre}\n` +
       `🩺 *Especialidad:* ${cita.especialidad}\n` +
       `🗓️ *Fecha:* ${fecha}\n` +
       `📍 *Lugar:* ${cita.lugar} (${cita.direccion || 'Sin dirección'})\n` +
-      `🤝 *Acompañante:* ${cita.acompanante ? `✅ ${cita.acompanante}` : '⚠️ ¡FALTA ACOMPAÑANTE!'}\n` +
       (cita.notas ? `📝 *Notas:* ${cita.notas}\n` : '') +
-      `\n🔗 Abrí la app familiar para postularte o ver detalles.`;
+      `\n🔗 Registrado en la app médica familiar.`;
 
-    const url = `https://wa.me/?text=${encodeURIComponent(texto)}`;
-    window.open(url, '_blank');
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
   };
 
-  const citasFiltradas = citas.filter(c => 
-    filtroPersona === 'todos' ? true : c.persona_id === filtroPersona
-  );
+  // Mensaje personal al paciente
+  const enviarWhatsAppPaciente = (cita: Cita, acompanante: string, paciente: Persona) => {
+    const fecha = new Date(cita.fecha_hora).toLocaleString('es-CO', { 
+      weekday: 'long', 
+      day: 'numeric', 
+      month: 'long', 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+
+    const texto = `Hola ${paciente.nombre} 👋,\n\n` +
+      `Te confirmamos que *${acompanante}* te va a acompañar a tu cita:\n` +
+      `🩺 *${cita.especialidad}*\n` +
+      `🗓️ *${fecha}*\n` +
+      `📍 *${cita.lugar}*\n` +
+      (cita.notas ? `📝 *Recomendación:* ${cita.notas}\n` : '') +
+      `\n¡Todo listo y organizado! ❤️`;
+
+    const telLimpio = paciente.telefono?.replace(/\D/g, '') || '';
+    const link = telLimpio 
+      ? `https://wa.me/57${telLimpio}?text=${encodeURIComponent(texto)}`
+      : `https://wa.me/?text=${encodeURIComponent(texto)}`;
+
+    window.open(link, '_blank');
+  };
+
+  // Días del mes actual para el calendario
+  const anio = mesActual.getFullYear();
+  const mes = mesActual.getMonth();
+  const primerDiaMes = new Date(anio, mes, 1);
+  const ultimoDiaMes = new Date(anio, mes + 1, 0);
+  
+  // Días de la semana (Lunes a Domingo)
+  // 0 = Domingo, 1 = Lunes ...
+  let diaInicioSemana = primerDiaMes.getDay();
+  // Ajustar para que semana empiece en Lunes (0 = Lunes, 6 = Domingo)
+  const offsetLunes = diaInicioSemana === 0 ? 6 : diaInicioSemana - 1;
+
+  const totalDias = ultimoDiaMes.getDate();
+  const celdasCalendario: Array<{ dia: number | null; fechaIso: string | null }> = [];
+
+  // Espacios vacíos antes del 1er día
+  for (let i = 0; i < offsetLunes; i++) {
+    celdasCalendario.push({ dia: null, fechaIso: null });
+  }
+
+  // Días reales del mes
+  for (let d = 1; d <= totalDias; d++) {
+    const mesStr = String(mes + 1).padStart(2, '0');
+    const diaStr = String(d).padStart(2, '0');
+    celdasCalendario.push({ 
+      dia: d, 
+      fechaIso: `${anio}-${mesStr}-${diaStr}` 
+    });
+  }
+
+  const nombresMeses = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+  ];
+
+  // Filtros
+  const citasFiltradas = citas.filter(c => {
+    const coincidePersona = filtroPersona === 'todos' ? true : c.persona_id === filtroPersona;
+    const coincideDia = diaSeleccionado ? c.fecha_hora.startsWith(diaSeleccionado) : true;
+    return coincidePersona && coincideDia;
+  });
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 antialiased p-4 sm:p-8">
-      <div className="max-w-5xl mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-50 text-slate-800 antialiased p-3 sm:p-6 lg:p-8">
+      <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* Encabezado Principal */}
-        <header className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <span className="p-2.5 bg-emerald-100 text-emerald-700 rounded-2xl">
-                <HeartHandshake className="w-6 h-6" />
-              </span>
-              <div>
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Citas Médicas Familia</h1>
-                <p className="text-slate-500 text-xs mt-0.5">
-                  Organización de médicos, direcciones y acompañantes de los abuelos y tías.
-                </p>
-              </div>
+        {/* Encabezado */}
+        <header className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="p-3 bg-emerald-100 text-emerald-700 rounded-2xl shadow-sm">
+              <HeartHandshake className="w-7 h-7" />
+            </span>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Citas Médicas Familia</h1>
+              <p className="text-slate-500 text-xs mt-0.5">
+                Calendario de salud, citas y turnos de acompañamiento para los abuelos y tías.
+              </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button 
               onClick={() => setModalPersonaAbierto(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-xs transition"
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-xs transition"
             >
               <User className="w-4 h-4 text-slate-500" />
               + Persona
             </button>
             <button 
               onClick={() => setModalNietoAbierto(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-xs transition"
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-xs transition"
             >
               <Users className="w-4 h-4 text-slate-500" />
-              + Nieto / Sobrino
+              + Nieto / Acompañante
             </button>
             <button 
               onClick={() => setModalCitaAbierto(true)}
@@ -265,21 +352,146 @@ export default function Home() {
           </div>
         </header>
 
-        {/* Barra de Nietos Registrados */}
+        {/* ======================================================== */}
+        {/* VISTA DE CALENDARIO MENSUAL ARRIBA                       */}
+        {/* ======================================================== */}
+        <section className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <CalendarIcon className="w-5 h-5 text-blue-600" />
+              <h2 className="text-lg font-bold text-slate-900">
+                {nombresMeses[mes]} {anio}
+              </h2>
+              {diaSeleccionado && (
+                <span className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 bg-blue-100 text-blue-800 rounded-full font-semibold">
+                  Filtrando: {diaSeleccionado}
+                  <button onClick={() => setDiaSeleccionado(null)} className="hover:text-blue-900">
+                    <X className="w-3 h-3 ml-0.5" />
+                  </button>
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setMesActual(new Date(anio, mes - 1, 1))}
+                className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-600 transition"
+                title="Mes anterior"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button 
+                onClick={() => setMesActual(new Date(anio, mes + 1, 1))}
+                className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-600 transition"
+                title="Mes siguiente"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+              <button 
+                onClick={() => { setMesActual(new Date()); setDiaSeleccionado(null); }}
+                className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition"
+              >
+                Hoy
+              </button>
+            </div>
+          </div>
+
+          {/* Cuadrícula de días */}
+          <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center text-xs">
+            {['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'].map(d => (
+              <div key={d} className="font-bold text-slate-400 py-1.5 tracking-wider uppercase text-[11px]">
+                {d}
+              </div>
+            ))}
+
+            {celdasCalendario.map((celda, idx) => {
+              if (!celda.dia) {
+                return <div key={`empty-${idx}`} className="min-h-[85px] sm:min-h-[105px] bg-slate-50/50 rounded-2xl border border-transparent" />;
+              }
+
+              const citasDelDia = citas.filter(c => c.fecha_hora.startsWith(celda.fechaIso || ''));
+              const esSeleccionado = diaSeleccionado === celda.fechaIso;
+              const esHoy = celda.fechaIso === hoyIso;
+
+              return (
+                <div
+                  key={celda.fechaIso}
+                  onClick={() => setDiaSeleccionado(esSeleccionado ? null : celda.fechaIso)}
+                  className={`min-h-[85px] sm:min-h-[105px] p-1.5 sm:p-2 rounded-2xl border text-left flex flex-col justify-between transition cursor-pointer ${
+                    esSeleccionado
+                      ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-500/20'
+                      : esHoy
+                      ? 'border-slate-300 bg-amber-50/30 hover:border-slate-400'
+                      : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded-lg ${
+                      esHoy ? 'bg-amber-500 text-white' : 'text-slate-700'
+                    }`}>
+                      {celda.dia}
+                    </span>
+                    {citasDelDia.length > 0 && (
+                      <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
+                        {citasDelDia.length} {citasDelDia.length === 1 ? 'cita' : 'citas'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Pastillas de citas del día */}
+                  <div className="space-y-1 mt-1 overflow-hidden">
+                    {citasDelDia.slice(0, 2).map(c => {
+                      const paciente = personas.find(p => p.id === c.persona_id);
+                      const hora = new Date(c.fecha_hora).toLocaleTimeString('es-CO', { 
+                        hour: 'numeric', 
+                        minute: '2-digit', 
+                        hour12: true 
+                      });
+                      const estaAcompanada = Boolean(c.acompanante);
+
+                      return (
+                        <div
+                          key={c.id}
+                          className={`px-1.5 py-1 rounded-xl text-[10px] sm:text-[11px] font-semibold truncate border ${
+                            estaAcompanada
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              : 'bg-amber-50 text-amber-900 border-amber-300'
+                          }`}
+                          title={`${c.especialidad} - ${paciente?.nombre} (${hora})`}
+                        >
+                          <div className="flex items-center justify-between gap-0.5">
+                            <span className="truncate">{c.especialidad.split(' ')[0]}</span>
+                            <span className="text-[9px] text-slate-500 font-normal shrink-0">{hora}</span>
+                          </div>
+                          <div className="text-[9px] truncate opacity-80">
+                            {paciente?.nombre?.split(' ')[0]} {estaAcompanada ? `(✅ ${c.acompanante})` : '⚠️ Falta'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {citasDelDia.length > 2 && (
+                      <div className="text-[10px] text-slate-400 font-semibold text-center">
+                        +{citasDelDia.length - 2} más
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Barra de Acompañantes y Filtros */}
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-slate-600 flex items-center gap-1">
-              <Users className="w-4 h-4 text-blue-500" /> Nietos / Acompañantes disponibles:
+              <Users className="w-4 h-4 text-blue-500" /> Acompañantes listos:
             </span>
-            {nietos.length === 0 ? (
-              <span className="text-slate-400 italic">No hay registrados aún.</span>
-            ) : (
-              nietos.map(n => (
-                <span key={n.id} className="px-2.5 py-1 bg-blue-50 text-blue-700 font-medium rounded-lg border border-blue-100">
-                  {n.nombre}
-                </span>
-              ))
-            )}
+            {nietos.map(n => (
+              <span key={n.id} className="px-2.5 py-1 bg-blue-50 text-blue-700 font-medium rounded-lg border border-blue-100">
+                {n.nombre}
+              </span>
+            ))}
           </div>
 
           <div className="flex items-center gap-2">
@@ -290,7 +502,7 @@ export default function Home() {
             )}
             <button 
               onClick={cargarDatos}
-              title="Refrescar citas"
+              title="Refrescar datos"
               className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
             >
               <RefreshCw className={`w-4 h-4 ${cargando ? 'animate-spin' : ''}`} />
@@ -302,14 +514,14 @@ export default function Home() {
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
           <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider pl-1">Filtrar:</span>
           <button 
-            onClick={() => setFiltroPersona('todos')}
+            onClick={() => { setFiltroPersona('todos'); setDiaSeleccionado(null); }}
             className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
-              filtroPersona === 'todos' 
+              filtroPersona === 'todos' && !diaSeleccionado
                 ? 'bg-slate-900 text-white' 
                 : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
             }`}
           >
-            Todos ({citas.length})
+            Todas las citas ({citas.length})
           </button>
           {personas.map(p => (
             <button 
@@ -326,17 +538,27 @@ export default function Home() {
           ))}
         </div>
 
-        {/* Listado de Citas */}
+        {/* Listado de Tarjetas de Citas Detalladas */}
         <div className="space-y-4">
-          <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-blue-600" />
-            Citas Programadas
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-blue-600" />
+              Detalle de Citas {diaSeleccionado ? `para el ${diaSeleccionado}` : ''}
+            </h2>
+            {diaSeleccionado && (
+              <button 
+                onClick={() => setDiaSeleccionado(null)}
+                className="text-xs text-blue-600 hover:underline font-semibold"
+              >
+                Ver todos los días
+              </button>
+            )}
+          </div>
 
           {citasFiltradas.length === 0 ? (
-            <div className="bg-white rounded-3xl p-12 text-center border border-dashed border-slate-300">
-              <Calendar className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-              <p className="text-slate-600 font-medium text-sm">No hay citas registradas para este paciente.</p>
+            <div className="bg-white rounded-3xl p-10 text-center border border-dashed border-slate-300">
+              <CalendarIcon className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+              <p className="text-slate-600 font-medium text-sm">No hay citas registradas para este filtro.</p>
               <p className="text-slate-400 text-xs mt-1">Hacé clic en "+ Programar Cita" arriba.</p>
             </div>
           ) : (
@@ -345,7 +567,7 @@ export default function Home() {
                 const paciente = personas.find(p => p.id === cita.persona_id);
                 const fechaObj = new Date(cita.fecha_hora);
                 const fechaFormateada = fechaObj.toLocaleDateString('es-CO', { 
-                  weekday: 'short', 
+                  weekday: 'long', 
                   day: 'numeric', 
                   month: 'short' 
                 });
@@ -474,7 +696,10 @@ export default function Home() {
                       )}
 
                       <button
-                        onClick={() => compartirWhatsApp(cita)}
+                        onClick={() => {
+                          const pac = personas.find(p => p.id === cita.persona_id) || { id: '', nombre: 'Familiar', parentesco: 'Familiar' };
+                          enviarWhatsAppGrupo(cita, cita.acompanante || 'Familiar', pac);
+                        }}
                         className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 text-slate-700 rounded-xl text-xs font-semibold transition border border-slate-200"
                         title="Enviar a grupo de WhatsApp"
                       >
@@ -489,6 +714,80 @@ export default function Home() {
           )}
         </div>
 
+        {/* Modal Confirmación Doble de WhatsApp tras postularse */}
+        {modalExitoWhatsApp && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </span>
+                  <h3 className="text-base font-bold text-slate-900">¡Asignado como Acompañante!</h3>
+                </div>
+                <button 
+                  onClick={() => setModalExitoWhatsApp(null)}
+                  className="text-slate-400 hover:text-slate-600 p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600">
+                Quedaste asignado/a para acompañar a <strong>{modalExitoWhatsApp.paciente.nombre}</strong> el{' '}
+                <strong>{new Date(modalExitoWhatsApp.cita.fecha_hora).toLocaleDateString('es-CO')}</strong>. ¿A quién querés notificar por WhatsApp?
+              </p>
+
+              <div className="space-y-2 pt-1">
+                {/* Botón 1: Grupo Familiar */}
+                <button
+                  onClick={() => {
+                    enviarWhatsAppGrupo(
+                      modalExitoWhatsApp.cita,
+                      modalExitoWhatsApp.acompanante,
+                      modalExitoWhatsApp.paciente
+                    );
+                  }}
+                  className="w-full flex items-center justify-between p-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold text-xs shadow-sm transition"
+                >
+                  <span className="flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4" />
+                    1. Enviar al Grupo Familiar de WhatsApp
+                  </span>
+                  <span>👉</span>
+                </button>
+
+                {/* Botón 2: Al teléfono del paciente */}
+                <button
+                  onClick={() => {
+                    enviarWhatsAppPaciente(
+                      modalExitoWhatsApp.cita,
+                      modalExitoWhatsApp.acompanante,
+                      modalExitoWhatsApp.paciente
+                    );
+                  }}
+                  className="w-full flex items-center justify-between p-3.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-2xl font-bold text-xs transition border border-slate-200"
+                >
+                  <span className="flex items-center gap-2">
+                    <Phone className="w-4 h-4 text-emerald-600" />
+                    2. Enviar a {modalExitoWhatsApp.paciente.nombre} (Directo)
+                  </span>
+                  <span>📲</span>
+                </button>
+              </div>
+
+              <div className="pt-2 text-center">
+                <button
+                  onClick={() => setModalExitoWhatsApp(null)}
+                  className="text-xs text-slate-400 hover:text-slate-600 underline"
+                >
+                  Listo, cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Modal Persona */}
         {modalPersonaAbierto && (
           <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -499,7 +798,7 @@ export default function Home() {
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Nombre</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Abuelita Elena" 
+                    placeholder="ej: Abuelita Bertha" 
                     required 
                     value={nuevaPersona.nombre}
                     onChange={e => setNuevaPersona({ ...nuevaPersona, nombre: e.target.value })}
@@ -510,7 +809,7 @@ export default function Home() {
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Parentesco</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Abuela, Tía, Mamá" 
+                    placeholder="ej: Abuelita, Tía, Mamá" 
                     required 
                     value={nuevaPersona.parentesco}
                     onChange={e => setNuevaPersona({ ...nuevaPersona, parentesco: e.target.value })}
@@ -521,9 +820,19 @@ export default function Home() {
                   <label className="block text-xs font-semibold text-slate-600 mb-1">EPS / Seguro</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Sanitas, Compensar" 
+                    placeholder="ej: Salud Total, Compensar" 
                     value={nuevaPersona.eps}
                     onChange={e => setNuevaPersona({ ...nuevaPersona, eps: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Teléfono Celular (para WhatsApp)</label>
+                  <input 
+                    type="text" 
+                    placeholder="ej: 3142502868" 
+                    value={nuevaPersona.telefono}
+                    onChange={e => setNuevaPersona({ ...nuevaPersona, telefono: e.target.value })}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
@@ -531,7 +840,7 @@ export default function Home() {
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Notas especiales</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Silla de ruedas, no puede caminar mucho" 
+                    placeholder="ej: Requiere transporte, no caminar mucho" 
                     value={nuevaPersona.notas}
                     onChange={e => setNuevaPersona({ ...nuevaPersona, notas: e.target.value })}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -567,7 +876,7 @@ export default function Home() {
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Nombre</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Felipe, Camilo, Andrea" 
+                    placeholder="ej: Pocho, Viviana, Paula" 
                     required 
                     value={nuevoNieto.nombre}
                     onChange={e => setNuevoNieto({ ...nuevoNieto, nombre: e.target.value })}
@@ -628,7 +937,7 @@ export default function Home() {
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Especialidad</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Cardiología, Oftalmología, Exámenes" 
+                    placeholder="ej: Oftalmología, Cardiología, Exámenes" 
                     required 
                     value={nuevaCita.especialidad}
                     onChange={e => setNuevaCita({ ...nuevaCita, especialidad: e.target.value })}
@@ -649,7 +958,7 @@ export default function Home() {
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Lugar / Sede</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Clínica Reina Sofía, Calle 100" 
+                    placeholder="ej: Oftalmohelp-Univer, Forest Medical Center" 
                     required 
                     value={nuevaCita.lugar}
                     onChange={e => setNuevaCita({ ...nuevaCita, lugar: e.target.value })}
@@ -657,10 +966,10 @@ export default function Home() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Dirección (para Maps)</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Dirección</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Cra 21 # 127-03" 
+                    placeholder="ej: Cra 7B Bis # 132-38 Piso 7" 
                     value={nuevaCita.direccion}
                     onChange={e => setNuevaCita({ ...nuevaCita, direccion: e.target.value })}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -670,17 +979,17 @@ export default function Home() {
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Doctor (Opcional)</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Dr. Ruiz" 
+                    placeholder="ej: Dr. Hector Hugo Lopez" 
                     value={nuevaCita.doctor}
                     onChange={e => setNuevaCita({ ...nuevaCita, doctor: e.target.value })}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Notas especiales</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Notas especiales (Copago, ayuno, etc.)</label>
                   <input 
                     type="text" 
-                    placeholder="ej: En ayunas, llevar exámenes previos" 
+                    placeholder="ej: Copago $29.200 en la IPS" 
                     value={nuevaCita.notas}
                     onChange={e => setNuevaCita({ ...nuevaCita, notas: e.target.value })}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
