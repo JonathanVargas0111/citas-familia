@@ -56,6 +56,21 @@ interface Cita {
   notas?: string;
 }
 
+// Funciones para generar y leer URLs amigables (ej: ?paciente=bertha)
+const obtenerSlugPaciente = (p: Persona) => {
+  const palabras = p.nombre
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter(Boolean);
+  
+  // Buscar el nombre propio (ignorando títulos como "abuelita", "tia")
+  const nombrePropio = palabras.find(w => !['abuelita', 'abuela', 'tia', 'dona', 'de'].includes(w));
+  return nombrePropio || palabras[0] || p.id;
+};
+
 export default function Home() {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [nietos, setNietos] = useState<Nieto[]>([]);
@@ -126,12 +141,16 @@ export default function Home() {
         setNietos(data.nietos || []);
         setCitas(data.citas || []);
 
-        // Leer parámetro de URL ?paciente=ID
+        // Leer parámetro amigable de URL ?paciente=bertha o ?paciente=yolanda
         if (typeof window !== 'undefined') {
           const params = new URLSearchParams(window.location.search);
-          const pacienteParam = params.get('paciente');
+          const pacienteParam = params.get('paciente')?.toLowerCase();
           if (pacienteParam) {
-            const encontrado = listaPersonas.find(p => p.id === pacienteParam || p.nombre.toLowerCase().includes(pacienteParam.toLowerCase()));
+            const encontrado = listaPersonas.find(p => 
+              p.id === pacienteParam || 
+              obtenerSlugPaciente(p) === pacienteParam ||
+              p.nombre.toLowerCase().includes(pacienteParam)
+            );
             if (encontrado) setPersonaEnPerfil(encontrado);
           }
         }
@@ -147,14 +166,14 @@ export default function Home() {
     cargarDatos();
   }, []);
 
-  // Manejar cambio de perfil y actualizar URL
+  // Manejar cambio de perfil y actualizar URL con slug amigable (ej: ?paciente=bertha)
   const seleccionarPerfil = (p: Persona | null) => {
     setPersonaEnPerfil(p);
     setDiaSeleccionado(null);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       if (p) {
-        url.searchParams.set('paciente', p.id);
+        url.searchParams.set('paciente', obtenerSlugPaciente(p));
       } else {
         url.searchParams.delete('paciente');
       }
@@ -165,7 +184,8 @@ export default function Home() {
   // Copiar link directo al perfil
   const copiarEnlacePerfil = () => {
     if (typeof window !== 'undefined' && personaEnPerfil) {
-      const link = `${window.location.origin}?paciente=${personaEnPerfil.id}`;
+      const slug = obtenerSlugPaciente(personaEnPerfil);
+      const link = `${window.location.origin}?paciente=${slug}`;
       navigator.clipboard.writeText(link);
       setMensajeCopiado(true);
       setTimeout(() => setMensajeCopiado(false), 2500);
@@ -175,11 +195,12 @@ export default function Home() {
   // Compartir ficha por WhatsApp
   const compartirFichaWhatsApp = () => {
     if (typeof window !== 'undefined' && personaEnPerfil) {
-      const link = `${window.location.origin}?paciente=${personaEnPerfil.id}`;
+      const slug = obtenerSlugPaciente(personaEnPerfil);
+      const link = `${window.location.origin}?paciente=${slug}`;
       const citasPersona = citas.filter(c => c.persona_id === personaEnPerfil.id);
       const texto = `👵 *Citas Médicas de ${personaEnPerfil.nombre}*\n\n` +
         `Tiene ${citasPersona.length} citas programadas.\n` +
-        `🔗 Abrí este enlace directo para ver su calendario y postularte como acompañante:\n${link}`;
+        `🔗 Abrí este enlace para ver su calendario y postularte como acompañante:\n${link}`;
       window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
     }
   };
