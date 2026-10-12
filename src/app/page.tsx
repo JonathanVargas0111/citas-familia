@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { supabase, isSupabaseConfigured, Persona, Cita } from '@/lib/supabase';
 import { 
   Calendar, 
   User, 
@@ -11,52 +10,55 @@ import {
   UserCheck, 
   Share2, 
   HeartHandshake, 
-  Activity,
   CheckCircle2,
   AlertCircle,
-  ExternalLink
+  ExternalLink,
+  Users,
+  RefreshCw
 } from 'lucide-react';
 
-const MOCK_PERSONAS: Persona[] = [
-  { id: '1', nombre: 'Abuelita Elena', parentesco: 'Abuela', eps: 'Sanitas', telefono: '3001234567', notas: 'Camina despacio, llevar bastón.' },
-  { id: '2', nombre: 'Tía Martha', parentesco: 'Tía', eps: 'Compensar', telefono: '3109876543', notas: 'Ayuno obligatorio para exámenes.' },
-];
+interface Persona {
+  id: string;
+  nombre: string;
+  parentesco: string;
+  eps?: string;
+  telefono?: string;
+  notas?: string;
+}
 
-const MOCK_CITAS: Cita[] = [
-  {
-    id: 'c1',
-    persona_id: '1',
-    especialidad: 'Cardiología',
-    doctor: 'Dr. Fernando Ruiz',
-    fecha_hora: '2026-10-16T08:30:00',
-    lugar: 'Clínica Reina Sofía',
-    direccion: 'Carrera 21 # 127-03, Bogotá',
-    acompanante: '',
-    estado: 'pendiente',
-    notas: 'Llevar electrocardiograma previo y carné de vacunación.',
-  },
-  {
-    id: 'c2',
-    persona_id: '2',
-    especialidad: 'Laboratorio de Sangre',
-    doctor: 'Dra. Silva',
-    fecha_hora: '2026-10-18T07:00:00',
-    lugar: 'Sede Calle 134',
-    direccion: 'Calle 134 # 9-20, Bogotá',
-    acompanante: 'Camilo (Nieto)',
-    acompanante_telefono: '3150001122',
-    estado: 'acompanada',
-    notas: 'Cita en ayunas desde las 8pm del día anterior.',
-  }
-];
+interface Nieto {
+  id: string;
+  nombre: string;
+  telefono?: string;
+}
+
+interface Cita {
+  id: string;
+  persona_id: string;
+  especialidad: string;
+  doctor?: string;
+  fecha_hora: string;
+  lugar: string;
+  direccion?: string;
+  acompanante?: string;
+  acompanante_telefono?: string;
+  estado: 'pendiente' | 'acompanada' | 'completada';
+  notas?: string;
+}
 
 export default function Home() {
   const [personas, setPersonas] = useState<Persona[]>([]);
+  const [nietos, setNietos] = useState<Nieto[]>([]);
   const [citas, setCitas] = useState<Cita[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [guardando, setGuardando] = useState(false);
   const [filtroPersona, setFiltroPersona] = useState<string>('todos');
+
+  // Modales
   const [modalPersonaAbierto, setModalPersonaAbierto] = useState(false);
+  const [modalNietoAbierto, setModalNietoAbierto] = useState(false);
   const [modalCitaAbierto, setModalCitaAbierto] = useState(false);
-  const [keepaliveStatus, setKeepaliveStatus] = useState<string | null>(null);
+  const [citaSeleccionadaParaAcompanar, setCitaSeleccionadaParaAcompanar] = useState<string | null>(null);
 
   // Formulario Persona
   const [nuevaPersona, setNuevaPersona] = useState({
@@ -65,6 +67,12 @@ export default function Home() {
     eps: '',
     telefono: '',
     notas: ''
+  });
+
+  // Formulario Nieto
+  const [nuevoNieto, setNuevoNieto] = useState({
+    nombre: '',
+    telefono: ''
   });
 
   // Formulario Cita
@@ -78,23 +86,21 @@ export default function Home() {
     notas: ''
   });
 
-  // Cargar datos
+  // Cargar datos desde la nube (Gist / API)
   const cargarDatos = async () => {
-    if (isSupabaseConfigured && supabase) {
-      const { data: dataPersonas } = await supabase.from('personas').select('*').order('nombre');
-      const { data: dataCitas } = await supabase.from('citas').select('*').order('fecha_hora');
-      
-      if (dataPersonas && dataPersonas.length > 0) setPersonas(dataPersonas);
-      else setPersonas(MOCK_PERSONAS);
-
-      if (dataCitas && dataCitas.length > 0) setCitas(dataCitas);
-      else setCitas(MOCK_CITAS);
-    } else {
-      // Usar localStorage o mock
-      const guardadoPersonas = localStorage.getItem('familia_personas');
-      const guardadoCitas = localStorage.getItem('familia_citas');
-      setPersonas(guardadoPersonas ? JSON.parse(guardadoPersonas) : MOCK_PERSONAS);
-      setCitas(guardadoCitas ? JSON.parse(guardadoCitas) : MOCK_CITAS);
+    setCargando(true);
+    try {
+      const res = await fetch('/api/db');
+      if (res.ok) {
+        const data = await res.json();
+        setPersonas(data.personas || []);
+        setNietos(data.nietos || []);
+        setCitas(data.citas || []);
+      }
+    } catch (err) {
+      console.error('Error cargando datos:', err);
+    } finally {
+      setCargando(false);
     }
   };
 
@@ -102,46 +108,65 @@ export default function Home() {
     cargarDatos();
   }, []);
 
-  // Guardar persona
+  // Guardar cambio en la nube
+  const sincronizar = async (nuevasPersonas = personas, nuevosNietos = nietos, nuevasCitas = citas) => {
+    setGuardando(true);
+    try {
+      await fetch('/api/db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          personas: nuevasPersonas,
+          nietos: nuevosNietos,
+          citas: nuevasCitas,
+        }),
+      });
+    } catch (err) {
+      console.error('Error sincronizando:', err);
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  // Crear Persona
   const handleGuardarPersona = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nuevaPersona.nombre || !nuevaPersona.parentesco) return;
 
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from('personas').insert([nuevaPersona]);
-      if (!error) cargarDatos();
-    } else {
-      const item: Persona = { id: Date.now().toString(), ...nuevaPersona };
-      const actualizadas = [...personas, item];
-      setPersonas(actualizadas);
-      localStorage.setItem('familia_personas', JSON.stringify(actualizadas));
-    }
-
+    const item: Persona = { id: Date.now().toString(), ...nuevaPersona };
+    const actualizadas = [...personas, item];
+    setPersonas(actualizadas);
     setNuevaPersona({ nombre: '', parentesco: '', eps: '', telefono: '', notas: '' });
     setModalPersonaAbierto(false);
+    await sincronizar(actualizadas, nietos, citas);
   };
 
-  // Guardar cita
+  // Crear Nieto / Acompañante
+  const handleGuardarNieto = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nuevoNieto.nombre) return;
+
+    const item: Nieto = { id: Date.now().toString(), ...nuevoNieto };
+    const actualizados = [...nietos, item];
+    setNietos(actualizados);
+    setNuevoNieto({ nombre: '', telefono: '' });
+    setModalNietoAbierto(false);
+    await sincronizar(personas, actualizados, citas);
+  };
+
+  // Crear Cita
   const handleGuardarCita = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nuevaCita.persona_id || !nuevaCita.especialidad || !nuevaCita.fecha_hora) return;
 
-    const payload = {
+    const item: Cita = {
+      id: Date.now().toString(),
       ...nuevaCita,
-      estado: 'pendiente' as const,
+      estado: 'pendiente',
       acompanante: ''
     };
-
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from('citas').insert([payload]);
-      if (!error) cargarDatos();
-    } else {
-      const item: Cita = { id: Date.now().toString(), ...payload };
-      const actualizadas = [...citas, item];
-      setCitas(actualizadas);
-      localStorage.setItem('familia_citas', JSON.stringify(actualizadas));
-    }
-
+    const actualizadas = [...citas, item];
+    setCitas(actualizadas);
     setNuevaCita({
       persona_id: '',
       especialidad: '',
@@ -152,29 +177,22 @@ export default function Home() {
       notas: ''
     });
     setModalCitaAbierto(false);
+    await sincronizar(personas, nietos, actualizadas);
   };
 
-  // Acompañar cita
-  const postularseAcompanante = async (citaId: string) => {
-    const nombre = prompt('¿Cuál es tu nombre (nieto/a, hijo/a)?');
-    if (!nombre) return;
-
-    if (isSupabaseConfigured && supabase) {
-      await supabase.from('citas').update({
-        acompanante: nombre,
-        estado: 'acompanada'
-      }).eq('id', citaId);
-      cargarDatos();
-    } else {
-      const actualizadas = citas.map(c => 
-        c.id === citaId ? { ...c, acompanante: nombre, estado: 'acompanada' as const } : c
-      );
-      setCitas(actualizadas);
-      localStorage.setItem('familia_citas', JSON.stringify(actualizadas));
-    }
+  // Asignar acompañante desde la lista de nietos
+  const asignarAcompanante = async (citaId: string, nombreAcompanante: string) => {
+    const actualizadas = citas.map(c => 
+      c.id === citaId 
+        ? { ...c, acompanante: nombreAcompanante, estado: 'acompanada' as const } 
+        : c
+    );
+    setCitas(actualizadas);
+    setCitaSeleccionadaParaAcompanar(null);
+    await sincronizar(personas, nietos, actualizadas);
   };
 
-  // Compartir a WhatsApp
+  // Compartir en WhatsApp familiar
   const compartirWhatsApp = (cita: Cita) => {
     const paciente = personas.find(p => p.id === cita.persona_id)?.nombre || 'Familiar';
     const fecha = new Date(cita.fecha_hora).toLocaleString('es-CO', { 
@@ -189,25 +207,13 @@ export default function Home() {
       `👤 *Paciente:* ${paciente}\n` +
       `🩺 *Especialidad:* ${cita.especialidad}\n` +
       `🗓️ *Fecha:* ${fecha}\n` +
-      `📍 *Lugar:* ${cita.lugar} (${cita.direccion || 'Sin dirección específica'})\n` +
+      `📍 *Lugar:* ${cita.lugar} (${cita.direccion || 'Sin dirección'})\n` +
       `🤝 *Acompañante:* ${cita.acompanante ? `✅ ${cita.acompanante}` : '⚠️ ¡FALTA ACOMPAÑANTE!'}\n` +
       (cita.notas ? `📝 *Notas:* ${cita.notas}\n` : '') +
-      `\nOrganizado con la app familiar.`;
+      `\n🔗 Abrí la app familiar para postularte o ver detalles.`;
 
     const url = `https://wa.me/?text=${encodeURIComponent(texto)}`;
     window.open(url, '_blank');
-  };
-
-  // Probar Keepalive diario
-  const probarKeepalive = async () => {
-    setKeepaliveStatus('Probando ping...');
-    try {
-      const res = await fetch('/api/keepalive');
-      const data = await res.json();
-      setKeepaliveStatus(`✅ Keepalive activo: ${data.status} (${new Date().toLocaleTimeString()})`);
-    } catch {
-      setKeepaliveStatus('❌ Error al probar keepalive');
-    }
   };
 
   const citasFiltradas = citas.filter(c => 
@@ -218,31 +224,40 @@ export default function Home() {
     <div className="min-h-screen bg-slate-50 text-slate-800 antialiased p-4 sm:p-8">
       <div className="max-w-5xl mx-auto space-y-6">
         
-        {/* Encabezado */}
-        <header className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        {/* Encabezado Principal */}
+        <header className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
+            <div className="flex items-center gap-2.5">
+              <span className="p-2.5 bg-emerald-100 text-emerald-700 rounded-2xl">
                 <HeartHandshake className="w-6 h-6" />
               </span>
-              <h1 className="text-2xl font-bold text-slate-900">Citas Médicas Familia</h1>
+              <div>
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Citas Médicas Familia</h1>
+                <p className="text-slate-500 text-xs mt-0.5">
+                  Organización de médicos, direcciones y acompañantes de los abuelos y tías.
+                </p>
+              </div>
             </div>
-            <p className="text-slate-500 text-sm mt-1">
-              Coordinación de citas, horarios y acompañantes para los abuelos y tías.
-            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button 
               onClick={() => setModalPersonaAbierto(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-medium text-sm transition"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-xs transition"
             >
-              <User className="w-4 h-4 text-slate-600" />
-              + Agregar Persona
+              <User className="w-4 h-4 text-slate-500" />
+              + Persona
+            </button>
+            <button 
+              onClick={() => setModalNietoAbierto(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium text-xs transition"
+            >
+              <Users className="w-4 h-4 text-slate-500" />
+              + Nieto / Sobrino
             </button>
             <button 
               onClick={() => setModalCitaAbierto(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium text-sm shadow-sm transition"
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-sm transition"
             >
               <Plus className="w-4 h-4" />
               + Programar Cita
@@ -250,35 +265,45 @@ export default function Home() {
           </div>
         </header>
 
-        {/* Estado Supabase y Anti-Pausa Keepalive */}
-        <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <Activity className="w-4 h-4 text-emerald-500 animate-pulse" />
-            <span className="font-semibold text-slate-700">Estado del Sistema:</span>
-            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-              {isSupabaseConfigured ? '🟢 Conectado a Supabase' : '🟡 Modo Local (Sin credenciales aún)'}
+        {/* Barra de Nietos Registrados */}
+        <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-slate-600 flex items-center gap-1">
+              <Users className="w-4 h-4 text-blue-500" /> Nietos / Acompañantes disponibles:
             </span>
+            {nietos.length === 0 ? (
+              <span className="text-slate-400 italic">No hay registrados aún.</span>
+            ) : (
+              nietos.map(n => (
+                <span key={n.id} className="px-2.5 py-1 bg-blue-50 text-blue-700 font-medium rounded-lg border border-blue-100">
+                  {n.nombre}
+                </span>
+              ))
+            )}
           </div>
 
           <div className="flex items-center gap-2">
-            {keepaliveStatus && (
-              <span className="text-slate-600 font-medium">{keepaliveStatus}</span>
+            {guardando && (
+              <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Guardando en nube...
+              </span>
             )}
             <button 
-              onClick={probarKeepalive}
-              className="text-blue-600 hover:underline font-semibold"
+              onClick={cargarDatos}
+              title="Refrescar citas"
+              className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
             >
-              Probar Keepalive diario anti-pausa
+              <RefreshCw className={`w-4 h-4 ${cargando ? 'animate-spin' : ''}`} />
             </button>
           </div>
         </div>
 
-        {/* Filtros rápidos por persona */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-2">
+        {/* Filtros rápidos por paciente */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
           <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider pl-1">Filtrar:</span>
           <button 
             onClick={() => setFiltroPersona('todos')}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
               filtroPersona === 'todos' 
                 ? 'bg-slate-900 text-white' 
                 : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
@@ -290,7 +315,7 @@ export default function Home() {
             <button 
               key={p.id}
               onClick={() => setFiltroPersona(p.id)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
                 filtroPersona === p.id 
                   ? 'bg-slate-900 text-white' 
                   : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
@@ -303,16 +328,16 @@ export default function Home() {
 
         {/* Listado de Citas */}
         <div className="space-y-4">
-          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-blue-600" />
-            Próximas Citas Médicas
+          <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-blue-600" />
+            Citas Programadas
           </h2>
 
           {citasFiltradas.length === 0 ? (
-            <div className="bg-white rounded-2xl p-12 text-center border border-dashed border-slate-300">
-              <Calendar className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-600 font-medium">No hay citas registradas para este filtro.</p>
-              <p className="text-slate-400 text-sm mt-1">Hacé clic en "+ Programar Cita" para agendar una.</p>
+            <div className="bg-white rounded-3xl p-12 text-center border border-dashed border-slate-300">
+              <Calendar className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+              <p className="text-slate-600 font-medium text-sm">No hay citas registradas para este paciente.</p>
+              <p className="text-slate-400 text-xs mt-1">Hacé clic en "+ Programar Cita" arriba.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -333,17 +358,17 @@ export default function Home() {
                 return (
                   <div 
                     key={cita.id} 
-                    className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex flex-col justify-between hover:shadow-md transition"
+                    className="bg-white rounded-3xl p-5 shadow-sm border border-slate-200 flex flex-col justify-between hover:shadow-md transition"
                   >
                     <div className="space-y-3">
-                      {/* Cabecera de la tarjeta */}
+                      {/* Cabecera */}
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700">
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700">
                             {cita.especialidad}
                           </span>
                           <h3 className="text-lg font-bold text-slate-900 mt-1">
-                            {paciente?.nombre || 'Paciente'}
+                            {paciente?.nombre || 'Familiar'}
                           </h3>
                           <p className="text-xs text-slate-500">
                             {paciente?.parentesco} • EPS: {paciente?.eps || 'No registrada'}
@@ -364,58 +389,94 @@ export default function Home() {
                       </div>
 
                       {/* Detalles */}
-                      <div className="space-y-1.5 text-sm text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                      <div className="space-y-1.5 text-xs text-slate-600 bg-slate-50 p-3 rounded-2xl border border-slate-100">
                         <div className="flex items-center gap-2">
                           <Clock className="w-4 h-4 text-slate-400" />
                           <span className="font-semibold text-slate-900 capitalize">{fechaFormateada}</span> a las <span className="font-semibold text-slate-900">{horaFormateada}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <MapPin className="w-4 h-4 text-slate-400" />
-                          <span>{cita.lugar}</span>
+                          <span className="font-medium text-slate-900">{cita.lugar}</span>
                           {cita.direccion && (
                             <a 
                               href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cita.lugar + ' ' + cita.direccion)}`}
                               target="_blank" 
                               rel="noreferrer"
-                              className="text-blue-600 hover:text-blue-800 inline-flex items-center text-xs ml-1"
+                              className="text-blue-600 hover:underline inline-flex items-center ml-1"
                             >
                               Maps <ExternalLink className="w-3 h-3 ml-0.5" />
                             </a>
                           )}
                         </div>
                         {cita.doctor && (
-                          <div className="text-xs text-slate-500 pl-6">
+                          <div className="text-slate-500 pl-6">
                             Doctor: {cita.doctor}
                           </div>
                         )}
                         {cita.notas && (
-                          <div className="text-xs text-slate-500 pl-6 italic">
+                          <div className="text-slate-500 pl-6 italic">
                             Nota: {cita.notas}
                           </div>
                         )}
                       </div>
                     </div>
 
-                    {/* Acciones */}
-                    <div className="pt-4 border-t border-slate-100 mt-4 flex items-center justify-between gap-2">
+                    {/* Selector de acompañante si se abre */}
+                    {citaSeleccionadaParaAcompanar === cita.id && (
+                      <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-2">
+                        <p className="text-xs font-bold text-emerald-900">¿Quién va a acompañar?</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {nietos.map(n => (
+                            <button
+                              key={n.id}
+                              onClick={() => asignarAcompanante(cita.id, n.nombre)}
+                              className="px-2.5 py-1 bg-white hover:bg-emerald-600 hover:text-white text-emerald-800 border border-emerald-300 rounded-xl text-xs font-semibold transition"
+                            >
+                              Yo ({n.nombre})
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => {
+                              const otro = prompt('Escribí tu nombre:');
+                              if (otro) asignarAcompanante(cita.id, otro);
+                            }}
+                            className="px-2.5 py-1 bg-emerald-200 hover:bg-emerald-300 text-emerald-900 rounded-xl text-xs font-semibold"
+                          >
+                            + Otro nombre
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => setCitaSeleccionadaParaAcompanar(null)}
+                          className="text-[11px] text-slate-500 hover:underline block pt-1"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Botones de acción */}
+                    <div className="pt-3 border-t border-slate-100 mt-4 flex items-center justify-between gap-2">
                       {!tieneAcompanante ? (
                         <button
-                          onClick={() => postularseAcompanante(cita.id)}
+                          onClick={() => setCitaSeleccionadaParaAcompanar(cita.id)}
                           className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
                         >
                           <UserCheck className="w-4 h-4" />
                           Yo acompaño
                         </button>
                       ) : (
-                        <span className="text-xs text-slate-400 flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Asignado
-                        </span>
+                        <button
+                          onClick={() => setCitaSeleccionadaParaAcompanar(cita.id)}
+                          className="text-xs text-slate-500 hover:text-slate-800 underline"
+                        >
+                          Cambiar acompañante
+                        </button>
                       )}
 
                       <button
                         onClick={() => compartirWhatsApp(cita)}
                         className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 text-slate-700 rounded-xl text-xs font-semibold transition border border-slate-200"
-                        title="Enviar resumen a grupo de WhatsApp"
+                        title="Enviar a grupo de WhatsApp"
                       >
                         <Share2 className="w-3.5 h-3.5" />
                         WhatsApp
@@ -428,21 +489,21 @@ export default function Home() {
           )}
         </div>
 
-        {/* Modal Nueva Persona */}
+        {/* Modal Persona */}
         {modalPersonaAbierto && (
           <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200">
-              <h3 className="text-lg font-bold text-slate-900 mb-4">Agregar Persona / Familiar</h3>
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+              <h3 className="text-base font-bold text-slate-900 mb-3">Agregar Familiar / Paciente</h3>
               <form onSubmit={handleGuardarPersona} className="space-y-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Nombre Completo</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Nombre</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Abuelita María" 
+                    placeholder="ej: Abuelita Elena" 
                     required 
                     value={nuevaPersona.nombre}
                     onChange={e => setNuevaPersona({ ...nuevaPersona, nombre: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
@@ -453,40 +514,40 @@ export default function Home() {
                     required 
                     value={nuevaPersona.parentesco}
                     onChange={e => setNuevaPersona({ ...nuevaPersona, parentesco: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">EPS o Seguro</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">EPS / Seguro</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Sanitas, Sura" 
+                    placeholder="ej: Sanitas, Compensar" 
                     value={nuevaPersona.eps}
                     onChange={e => setNuevaPersona({ ...nuevaPersona, eps: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Notas especiales</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Camina despacio, medicación matutina" 
+                    placeholder="ej: Silla de ruedas, no puede caminar mucho" 
                     value={nuevaPersona.notas}
                     onChange={e => setNuevaPersona({ ...nuevaPersona, notas: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-                <div className="pt-3 flex items-center justify-end gap-2">
+                <div className="pt-2 flex items-center justify-end gap-2">
                   <button 
                     type="button" 
                     onClick={() => setModalPersonaAbierto(false)}
-                    className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                    className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
                   >
                     Cancelar
                   </button>
                   <button 
                     type="submit" 
-                    className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm"
+                    className="px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl"
                   >
                     Guardar
                   </button>
@@ -496,11 +557,58 @@ export default function Home() {
           </div>
         )}
 
-        {/* Modal Nueva Cita */}
+        {/* Modal Nieto */}
+        {modalNietoAbierto && (
+          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-xl border border-slate-200">
+              <h3 className="text-base font-bold text-slate-900 mb-3">Agregar Nieto / Acompañante</h3>
+              <form onSubmit={handleGuardarNieto} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Nombre</label>
+                  <input 
+                    type="text" 
+                    placeholder="ej: Felipe, Camilo, Andrea" 
+                    required 
+                    value={nuevoNieto.nombre}
+                    onChange={e => setNuevoNieto({ ...nuevoNieto, nombre: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Teléfono (Opcional)</label>
+                  <input 
+                    type="text" 
+                    placeholder="ej: 3001234567" 
+                    value={nuevoNieto.telefono}
+                    onChange={e => setNuevoNieto({ ...nuevoNieto, telefono: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="pt-2 flex items-center justify-end gap-2">
+                  <button 
+                    type="button" 
+                    onClick={() => setModalNietoAbierto(false)}
+                    className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl"
+                  >
+                    Guardar
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Cita */}
         {modalCitaAbierto && (
           <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200">
-              <h3 className="text-lg font-bold text-slate-900 mb-4">Programar Cita Médica</h3>
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+              <h3 className="text-base font-bold text-slate-900 mb-3">Programar Cita Médica</h3>
               <form onSubmit={handleGuardarCita} className="space-y-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Paciente</label>
@@ -508,23 +616,23 @@ export default function Home() {
                     required 
                     value={nuevaCita.persona_id}
                     onChange={e => setNuevaCita({ ...nuevaCita, persona_id: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="">Seleccionar paciente...</option>
+                    <option value="">Seleccionar familiar...</option>
                     {personas.map(p => (
                       <option key={p.id} value={p.id}>{p.nombre} ({p.parentesco})</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Especialidad / Tipo de cita</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Especialidad</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Cardiología, Oftalmología, Laboratorio" 
+                    placeholder="ej: Cardiología, Oftalmología, Exámenes" 
                     required 
                     value={nuevaCita.especialidad}
                     onChange={e => setNuevaCita({ ...nuevaCita, especialidad: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
@@ -534,28 +642,28 @@ export default function Home() {
                     required 
                     value={nuevaCita.fecha_hora}
                     onChange={e => setNuevaCita({ ...nuevaCita, fecha_hora: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Lugar / Clínica</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Lugar / Sede</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Clínica Reina Sofía, Sede Calle 100" 
+                    placeholder="ej: Clínica Reina Sofía, Calle 100" 
                     required 
                     value={nuevaCita.lugar}
                     onChange={e => setNuevaCita({ ...nuevaCita, lugar: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Dirección (para Maps / Waze)</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Dirección (para Maps)</label>
                   <input 
                     type="text" 
-                    placeholder="ej: Carrera 21 # 127-03" 
+                    placeholder="ej: Cra 21 # 127-03" 
                     value={nuevaCita.direccion}
                     onChange={e => setNuevaCita({ ...nuevaCita, direccion: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
@@ -565,32 +673,32 @@ export default function Home() {
                     placeholder="ej: Dr. Ruiz" 
                     value={nuevaCita.doctor}
                     onChange={e => setNuevaCita({ ...nuevaCita, doctor: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Recomendaciones / Notas</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Notas especiales</label>
                   <input 
                     type="text" 
-                    placeholder="ej: En ayunas, llevar exámenes anteriores" 
+                    placeholder="ej: En ayunas, llevar exámenes previos" 
                     value={nuevaCita.notas}
                     onChange={e => setNuevaCita({ ...nuevaCita, notas: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-                <div className="pt-3 flex items-center justify-end gap-2">
+                <div className="pt-2 flex items-center justify-end gap-2">
                   <button 
                     type="button" 
                     onClick={() => setModalCitaAbierto(false)}
-                    className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                    className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
                   >
                     Cancelar
                   </button>
                   <button 
                     type="submit" 
-                    className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm"
+                    className="px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl"
                   >
-                    Guardar Cita
+                    Guardar
                   </button>
                 </div>
               </form>
