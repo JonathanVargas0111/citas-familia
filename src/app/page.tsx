@@ -99,6 +99,8 @@ export default function Home() {
   const [modalNietoAbierto, setModalNietoAbierto] = useState(false);
   const [modalCitaAbierto, setModalCitaAbierto] = useState(false);
   const [citaSeleccionadaParaAcompanar, setCitaSeleccionadaParaAcompanar] = useState<string | null>(null);
+  const [citaParaEditarNotas, setCitaParaEditarNotas] = useState<Cita | null>(null);
+  const [textoNuevaNota, setTextoNuevaNota] = useState('');
   const [modalExitoWhatsApp, setModalExitoWhatsApp] = useState<{
     cita: Cita;
     acompanante: string;
@@ -246,6 +248,28 @@ export default function Home() {
     setNuevoNieto({ nombre: '', telefono: '' });
     setModalNietoAbierto(false);
     await sincronizar(personas, actualizados, citas);
+  };
+
+  // Guardar o actualizar notas médicas / entrega de resultados
+  const guardarNotaCita = async (citaId: string, nuevaNota: string) => {
+    const actualizadas = citas.map(c => 
+      c.id === citaId ? { ...c, notas: nuevaNota } : c
+    );
+    setCitas(actualizadas);
+    setCitaParaEditarNotas(null);
+    await sincronizar(personas, nietos, actualizadas);
+  };
+
+  // Alternar estado completada / pendiente
+  const toggleCompletada = async (citaId: string) => {
+    const cita = citas.find(c => c.id === citaId);
+    if (!cita) return;
+    const nuevoEstado = cita.estado === 'completada' ? 'acompanada' : 'completada';
+    const actualizadas = citas.map(c => 
+      c.id === citaId ? { ...c, estado: nuevoEstado as any } : c
+    );
+    setCitas(actualizadas);
+    await sincronizar(personas, nietos, actualizadas);
   };
 
   // Crear Cita
@@ -896,7 +920,12 @@ export default function Home() {
                           </button>
                         </div>
 
-                        {tieneAcompanante ? (
+                        {cita.estado === 'completada' ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-xs">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            ✅ Realizada ({cita.acompanante || 'Felipe'})
+                          </span>
+                        ) : tieneAcompanante ? (
                           <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             Acompaña: {cita.acompanante}
@@ -934,11 +963,43 @@ export default function Home() {
                             Doctor: {cita.doctor}
                           </div>
                         )}
-                        {cita.notas && (
-                          <div className="text-slate-600 font-medium pl-6 italic bg-amber-50/50 p-1.5 rounded-lg border border-amber-100">
-                            💡 {cita.notas}
+
+                        {/* Caja Destacada de Notas y Resultados */}
+                        <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-2.5 space-y-1.5 mt-2">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-slate-800 flex items-center gap-1 text-[11px]">
+                              📝 Notas / Resultados médicos:
+                            </span>
+                            <button
+                              onClick={() => {
+                                setCitaParaEditarNotas(cita);
+                                setTextoNuevaNota(cita.notas || '');
+                              }}
+                              className="text-[11px] font-bold text-blue-600 hover:text-blue-800 underline"
+                            >
+                              ✏️ Editar notas
+                            </button>
                           </div>
-                        )}
+                          {cita.notas ? (
+                            <p className="text-slate-700 text-xs italic whitespace-pre-line leading-relaxed">
+                              {cita.notas}
+                            </p>
+                          ) : (
+                            <p className="text-slate-400 text-xs italic">
+                              Sin notas registradas aún. Tocá "Editar notas" para agregar.
+                            </p>
+                          )}
+                          {cita.notas?.includes('citasuniver.com') && (
+                            <a
+                              href="https://www.citasuniver.com"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 bg-white px-2.5 py-1 rounded-lg border border-blue-200 hover:bg-blue-50 transition mt-1"
+                            >
+                              🌐 Abrir portal www.citasuniver.com <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -976,22 +1037,47 @@ export default function Home() {
                     )}
 
                     {/* Botones de acción */}
-                    <div className="pt-3 border-t border-slate-100 mt-4 flex items-center justify-between gap-2">
-                      {!tieneAcompanante ? (
-                        <button
-                          onClick={() => setCitaSeleccionadaParaAcompanar(cita.id)}
-                          className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
-                        >
-                          <UserCheck className="w-4 h-4" />
-                          Yo acompaño
-                        </button>
+                    <div className="pt-3 border-t border-slate-100 mt-4 flex items-center justify-between gap-2 flex-wrap">
+                      {cita.estado !== 'completada' ? (
+                        <div className="flex items-center gap-2 flex-1">
+                          {!tieneAcompanante ? (
+                            <button
+                              onClick={() => setCitaSeleccionadaParaAcompanar(cita.id)}
+                              className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                            >
+                              <UserCheck className="w-4 h-4" />
+                              Yo acompaño
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setCitaSeleccionadaParaAcompanar(cita.id)}
+                              className="text-xs text-slate-500 hover:text-slate-800 underline"
+                            >
+                              Cambiar nieto
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => toggleCompletada(cita.id)}
+                            className="inline-flex items-center gap-1 px-3 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-xl text-xs font-bold transition"
+                            title="Marcar cita como completada / ya realizada"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            ✓ Realizada
+                          </button>
+                        </div>
                       ) : (
-                        <button
-                          onClick={() => setCitaSeleccionadaParaAcompanar(cita.id)}
-                          className="text-xs text-slate-500 hover:text-slate-800 underline"
-                        >
-                          Cambiar acompañante
-                        </button>
+                        <div className="flex items-center gap-2 flex-1">
+                          <span className="text-xs font-bold text-emerald-700 flex items-center gap-1">
+                            <CheckCircle2 className="w-4 h-4" /> Cita cumplida
+                          </span>
+                          <button
+                            onClick={() => toggleCompletada(cita.id)}
+                            className="text-[11px] text-slate-400 hover:text-slate-600 underline"
+                          >
+                            Reabrir
+                          </button>
+                        </div>
                       )}
 
                       <button
@@ -1312,6 +1398,56 @@ export default function Home() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Editar Notas de la Cita */}
+        {citaParaEditarNotas && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-fade-in">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  📝 Notas y Resultados Médicos
+                </h3>
+                <button 
+                  onClick={() => setCitaParaEditarNotas(null)}
+                  className="text-slate-400 hover:text-slate-600 p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-500">
+                Agregá indicaciones post-cita, fecha de entrega de resultados, links de descarga o recomendaciones del médico.
+              </p>
+
+              <div>
+                <textarea
+                  rows={4}
+                  value={textoNuevaNota}
+                  onChange={e => setTextoNuevaNota(e.target.value)}
+                  placeholder="ej: Resultados disponibles en 8 días hábiles en www.citasuniver.com con CC..."
+                  className="w-full p-3 text-xs border border-slate-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCitaParaEditarNotas(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => guardarNotaCita(citaParaEditarNotas.id, textoNuevaNota)}
+                  className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm"
+                >
+                  Guardar Nota
+                </button>
+              </div>
             </div>
           </div>
         )}
