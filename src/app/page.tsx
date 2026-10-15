@@ -54,6 +54,7 @@ interface Cita {
   acompanante_telefono?: string;
   estado: 'pendiente' | 'acompanada' | 'completada';
   notas?: string;
+  imagenes?: string[];
 }
 
 // Funciones para generar y leer URLs amigables (ej: ?paciente=bertha)
@@ -101,6 +102,7 @@ export default function Home() {
   const [citaSeleccionadaParaAcompanar, setCitaSeleccionadaParaAcompanar] = useState<string | null>(null);
   const [citaParaEditarNotas, setCitaParaEditarNotas] = useState<Cita | null>(null);
   const [textoNuevaNota, setTextoNuevaNota] = useState('');
+  const [imagenAmpliada, setImagenAmpliada] = useState<string | null>(null);
   const [modalExitoWhatsApp, setModalExitoWhatsApp] = useState<{
     cita: Cita;
     acompanante: string;
@@ -1000,6 +1002,45 @@ export default function Home() {
                             </a>
                           )}
                         </div>
+
+                        {/* Documentos y Fotos Adjuntas */}
+                        {cita.imagenes && cita.imagenes.length > 0 && (
+                          <div className="bg-white border border-slate-200 rounded-xl p-2.5 space-y-2 mt-2">
+                            <span className="font-bold text-slate-800 flex items-center gap-1.5 text-[11px]">
+                              📷 Fotos / Órdenes adjuntas ({cita.imagenes.length}):
+                            </span>
+                            <div className="grid grid-cols-2 gap-2">
+                              {cita.imagenes.map((imgUrl, imgIdx) => {
+                                const esOrden = imgUrl.toLowerCase().includes('orden');
+                                const titulo = esOrden ? 'Orden Médica (OCT)' : 'Comprobante de Entrega';
+                                return (
+                                  <button
+                                    key={imgIdx}
+                                    type="button"
+                                    onClick={() => setImagenAmpliada(imgUrl)}
+                                    className="group relative rounded-xl overflow-hidden border border-slate-200 bg-slate-50 flex flex-col hover:border-blue-500 hover:shadow-md transition text-left"
+                                  >
+                                    <div className="h-28 sm:h-32 w-full overflow-hidden bg-slate-200 relative">
+                                      <img 
+                                        src={imgUrl} 
+                                        alt={titulo}
+                                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                                        loading="lazy"
+                                      />
+                                      <span className="absolute top-1.5 right-1.5 p-1 bg-black/60 text-white rounded-lg group-hover:bg-blue-600 transition">
+                                        <Maximize2 className="w-3.5 h-3.5" />
+                                      </span>
+                                    </div>
+                                    <div className="p-1.5 bg-white">
+                                      <p className="text-[10px] font-bold text-slate-800 truncate">{titulo}</p>
+                                      <p className="text-[9px] text-blue-600 font-semibold">Tocar para ampliar 🔍</p>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1447,6 +1488,50 @@ export default function Home() {
                 >
                   Guardar Nota
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Imagen Ampliada / Lightbox */}
+        {imagenAmpliada && (
+          <div 
+            className="fixed inset-0 z-50 bg-black/90 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 animate-fade-in"
+            onClick={() => setImagenAmpliada(null)}
+          >
+            <div 
+              className="relative max-w-2xl w-full max-h-[92vh] bg-slate-900 rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="p-3.5 bg-slate-950 flex items-center justify-between text-white border-b border-slate-800">
+                <span className="text-xs font-bold flex items-center gap-1.5 truncate">
+                  📷 {imagenAmpliada.includes('orden') ? 'Orden Médica (OCT) - Abuelita Bertha' : 'Comprobante Entrega de Resultados'}
+                </span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <a
+                    href={imagenAmpliada}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl text-xs flex items-center gap-1 transition"
+                    title="Abrir en pestaña nueva o guardar"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                  <button
+                    onClick={() => setImagenAmpliada(null)}
+                    className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition"
+                    title="Cerrar"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+              <div className="p-2 overflow-auto flex items-center justify-center bg-black/60 min-h-[350px]">
+                <img 
+                  src={imagenAmpliada} 
+                  alt="Documento médico" 
+                  className="max-h-[75vh] w-auto max-w-full object-contain rounded-xl shadow-2xl"
+                />
               </div>
             </div>
           </div>
